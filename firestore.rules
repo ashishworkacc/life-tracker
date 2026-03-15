@@ -1,0 +1,39 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: user is authenticated and owns the document
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Users collection — users can only read/write their own doc
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // All other collections use userId field for ownership
+    // These rules apply to: habits, daily_summaries, daily_habit_logs,
+    // sleep_logs, weight_logs, screen_time_logs, food_logs, goals, milestones,
+    // daily_actions, books, todos, time_entries, custom_counters, counter_logs,
+    // user_xp, xp_events, badges, daily_insights, correlations, weekly_reflections,
+    // daily_energy_logs, pomodoro_sessions, task_breakdowns, checkin_logs,
+    // overwhelm_sessions, inbox, surprise_insights, vitals_logs
+
+    match /{collection}/{docId} {
+      allow read, write: if request.auth != null
+        && (
+          // User owns the document via userId field
+          resource.data.userId == request.auth.uid
+          // Or creating new document with own userId
+          || (request.method == 'create' && request.resource.data.userId == request.auth.uid)
+        );
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
