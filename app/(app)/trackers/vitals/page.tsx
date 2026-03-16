@@ -341,36 +341,6 @@ export default function VitalsPage() {
         </div>
       )}
 
-      {/* ─── VITALS FORM ─── */}
-      <div className="card space-y-3">
-        <h3 className="font-semibold text-sm">📊 Daily Vitals (optional)</h3>
-        {[
-          { label: 'Blood Pressure', placeholder: 'e.g. 120/80', val: bp, set: setBp, icon: '❤️' },
-          { label: 'Blood Sugar (mg/dL)', placeholder: 'e.g. 95', val: sugar, set: setSugar, icon: '🩸' },
-          { label: 'Heart Rate (bpm)', placeholder: 'e.g. 72', val: hr, set: setHr, icon: '💓' },
-        ].map(f => (
-          <div key={f.label} className="flex items-center gap-3">
-            <span className="text-xl w-8">{f.icon}</span>
-            <div className="flex-1">
-              <label className="text-xs text-muted mb-1 block">{f.label}</label>
-              <input type="text" value={f.val} onChange={e => f.set(e.target.value)}
-                placeholder={f.placeholder}
-                className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-            </div>
-          </div>
-        ))}
-        <textarea value={notes} onChange={e => setNotes(e.target.value)}
-          placeholder="Notes (symptoms, how you feel...)" rows={2}
-          className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-        <button onClick={saveVitals} disabled={savingVitals}
-          className="w-full py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
-          style={{ background: savedVitals ? '#22c55e' : '#14b8a6', color: 'white' }}>
-          {savingVitals ? 'Saving...' : savedVitals ? '✓ Saved!' : 'Save vitals'}
-        </button>
-      </div>
-
       {/* ─── RECENT LOGS ─── */}
       {recentLogs.length > 0 && (
         <div className="card">

@@ -15,14 +15,9 @@ const MORE_SECTIONS = [
   { href: '/now',          icon: '🍅', label: 'Pomodoro' },
   { href: '/goals',        icon: '🎯', label: 'Goals' },
   { href: '/trackers',     icon: '📈', label: 'Trackers' },
-  { href: '/focus',        icon: '🔥', label: 'Focus' },
   { href: '/journal',      icon: '📓', label: 'Journal' },
   { href: '/time-tracker', icon: '⏱️', label: 'Time' },
-  { href: '/dashboard',    icon: '📊', label: 'Stats' },
-  { href: '/gamification', icon: '🏆', label: 'Achievements' },
-  { href: '/ai-insights',  icon: '🤖', label: 'AI Insights' },
   { href: '/chat',         icon: '💬', label: 'AI Chat' },
-  { href: '/inbox',        icon: '📥', label: 'Inbox' },
   { href: '/settings',     icon: '⚙️', label: 'Settings' },
 ]
 

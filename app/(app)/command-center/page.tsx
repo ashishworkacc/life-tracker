@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/lib/hooks/useAuth'
 import {
   addDocument, queryDocuments, updateDocument, deleteDocument,
@@ -9,179 +9,191 @@ import {
 import type { DocumentData } from 'firebase/firestore'
 import Link from 'next/link'
 
-interface HabitLog { id: string; habitId: string; name: string; completed: boolean; priority: number; emoji?: string }
-interface ActivityLog { id: string; text: string; mood: number | null; activityTag: string | null; timestamp: string; hour: number }
-interface TodoItem { id: string; title: string; priority: number; category: string; completed: boolean }
+// ─── Types ──────────────────────────────────────────────────────────────────
+interface HabitRow { id: string; habitId: string; name: string; emoji?: string; priority: number; scheduledTime: string }
+interface TodoItem  { id: string; title: string; priority: number; category: string }
 interface Medication { id: string; name: string; dosage?: string; frequency: string }
-interface DailyTask { id: string; title: string; targetCount: number; emoji: string; color: string }
-interface HabitDot { date: string; done: number; total: number }
 interface CounterSummary { id: string; name: string; emoji: string; currentCount: number; targetCount: number; color: string }
+interface HabitDot  { date: string; done: number; total: number }
+interface PomodoroSession { taskText: string; durationMins: number; timestamp: string }
+interface DailyTask { id: string; title: string; targetCount: number; emoji: string; color: string }
 
-const MOOD_EMOJIS = ['😔', '😐', '🙂', '😊', '🚀']
-const ACTIVITY_COLORS: Record<string, string> = {
-  Morning: '#f59e0b', Eating: '#22c55e', Working: '#3b82f6',
-  Exercise: '#ef4444', Commute: '#8b5cf6', Resting: '#6b7280',
-  Learning: '#14b8a6', Social: '#ec4899', Home: '#f97316', 'Self-care': '#a78bfa',
+// ─── XP math ────────────────────────────────────────────────────────────────
+const XP_PER_LEVEL = 200
+function xpProgress(xpTotal: number) {
+  const level  = Math.floor(xpTotal / XP_PER_LEVEL) + 1
+  const earned = xpTotal % XP_PER_LEVEL
+  return { level, earned, needed: XP_PER_LEVEL }
 }
-const DAY_START = 6
-const DAY_END = 23
 
+const DAY_START = 6
+const DAY_END   = 23
+
+function getDateStr(daysAgo: number) {
+  const d = new Date(); d.setDate(d.getDate() - daysAgo)
+  return d.toISOString().split('T')[0]
+}
+
+// ─── Tiny animated +XP pop-up ───────────────────────────────────────────────
+function XpPop({ amount, onDone }: { amount: number; onDone: () => void }) {
+  useEffect(() => { const t = setTimeout(onDone, 1200); return () => clearTimeout(t) }, [])
+  return (
+    <span className="absolute -top-4 right-0 text-xs font-bold animate-bounce pointer-events-none z-10"
+      style={{ color: '#a855f7' }}>+{amount} XP</span>
+  )
+}
+
+// ─── Main component ──────────────────────────────────────────────────────────
 export default function CommandCenterPage() {
   const { user } = useAuth()
   const date = todayDate()
-  const now = new Date()
-  const hour = now.getHours()
-  const minute = now.getMinutes()
 
-  // Day progress
-  const dayStartMins = DAY_START * 60
-  const dayEndMins = DAY_END * 60
-  const totalMins = dayEndMins - dayStartMins
-  const currentMins = hour * 60 + minute
-  const elapsedMins = Math.max(0, Math.min(currentMins - dayStartMins, totalMins))
-  const remainingMins = Math.max(0, totalMins - elapsedMins)
-  const dayPct = Math.round((elapsedMins / totalMins) * 100)
-  const urgencyColor = remainingMins < 120 ? '#ef4444' : remainingMins < 240 ? '#f59e0b' : '#14b8a6'
-  const isMorning = hour >= 5 && hour < 13
+  // Live clock — updates every minute so day-progress recomputes
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(t)
+  }, [])
 
-  // Time of day label
+  const hour      = now.getHours()
+  const minute    = now.getMinutes()
+  const dayStart  = DAY_START * 60
+  const dayEnd    = DAY_END   * 60
+  const totalMins = dayEnd - dayStart
+  const curMins   = hour * 60 + minute
+  const elapsed   = Math.max(0, Math.min(curMins - dayStart, totalMins))
+  const remaining = Math.max(0, totalMins - elapsed)
+  const dayPct    = Math.round((elapsed / totalMins) * 100)
+  const urgencyColor = remaining < 120 ? '#ef4444' : remaining < 240 ? '#f59e0b' : '#14b8a6'
   const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
 
-  // Form state
-  const [weight, setWeight] = useState('')
-  const [medsChecked, setMedsChecked] = useState(false)
-  const [oneThing, setOneThing] = useState('')
-  const [burnoutMode, setBurnoutMode] = useState(false)
-
-  // Data state
-  const [habits, setHabits] = useState<HabitLog[]>([])
+  // ── Data state ──
+  const [habits, setHabits]     = useState<HabitRow[]>([])
   const [habitsDone, setHabitsDone] = useState<Set<string>>(new Set())
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
-  const [identityStatement, setIdentityStatement] = useState('')
-  const [identityVotes, setIdentityVotes] = useState(0)
-  const [p1Todos, setP1Todos] = useState<TodoItem[]>([])
+  const [p1Todos, setP1Todos]   = useState<TodoItem[]>([])
+  const [todoStats, setTodoStats] = useState({ personal: 0, work: 0 })
   const [medications, setMedications] = useState<Medication[]>([])
   const [medsTaken, setMedsTaken] = useState<Set<string>>(new Set())
-  const [todayStats, setTodayStats] = useState({ sleep: null as number | null, weight: null as number | null, screen: null as number | null, focus: 0 })
-  const [xpToday, setXpToday] = useState(0)
-  const [xpLevel, setXpLevel] = useState(1)
-
-  // Daily tasks (repeating, resets each day)
+  const [todayStats, setTodayStats] = useState({ sleep: null as number | null, focus: 0 })
+  const [xpToday, setXpToday]   = useState(0)
+  const [xpTotal, setXpTotal]   = useState(0)
+  const [habitDots, setHabitDots] = useState<HabitDot[]>([])
+  const [weeklyHabitPct, setWeeklyHabitPct] = useState<number | null>(null)
+  const [topCounters, setTopCounters] = useState<CounterSummary[]>([])
+  const [focusSessions, setFocusSessions] = useState<PomodoroSession[]>([])
+  const [focusStreak, setFocusStreak] = useState(0)
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([])
   const [dailyTaskCounts, setDailyTaskCounts] = useState<Record<string, number>>({})
+  const [dataLoaded, setDataLoaded] = useState(false)
+
+  // ── UI state ──
+  const [oneThing, setOneThing] = useState('')
+  const [weight, setWeight]     = useState('')
+  const [burnoutMode, setBurnoutMode] = useState(false)
+  const [saving, setSaving]     = useState(false)
+  const [saved, setSaved]       = useState(false)
+  const [xpPops, setXpPops]     = useState<{ id: number; amount: number; habitId: string }[]>([])
+  const xpPopIdRef              = useRef(0)
+
+  // ── AI state ──
+  const [aiBrief, setAiBrief]   = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiLoaded, setAiLoaded] = useState(false)
+
+  // ── Daily tasks ──
   const [showAddDailyTask, setShowAddDailyTask] = useState(false)
   const [newDailyTaskTitle, setNewDailyTaskTitle] = useState('')
   const [newDailyTaskTarget, setNewDailyTaskTarget] = useState('10')
   const [newDailyTaskEmoji, setNewDailyTaskEmoji] = useState('🎯')
 
-  // Stats from history
-  const [habitDots, setHabitDots] = useState<HabitDot[]>([])
-  const [topCounters, setTopCounters] = useState<CounterSummary[]>([])
-  const [todoStats, setTodoStats] = useState({ personal: 0, work: 0 })
-  const [weeklyHabitPct, setWeeklyHabitPct] = useState<number | null>(null)
-  const [dataLoaded, setDataLoaded] = useState(false)
-
-  // AI brief
-  const [aiBrief, setAiBrief] = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiLoaded, setAiLoaded] = useState(false)
-
-  // UI
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-
+  // ── Auto-refresh every 5 minutes ──
   useEffect(() => {
     if (!user) return
     loadData()
+    const t = setInterval(() => { loadData() }, 5 * 60_000)
+    return () => clearInterval(t)
   }, [user])
 
-  // Auto-load AI brief once all data is available
+  // Auto-load AI brief when data ready
   useEffect(() => {
-    if (dataLoaded && !aiLoaded && !aiLoading) {
-      loadAiBrief()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (dataLoaded && !aiLoaded && !aiLoading) loadAiBrief()
   }, [dataLoaded])
 
   async function loadData() {
     if (!user) return
     const { getUserDoc } = await import('@/lib/firebase/db')
     const userDoc = await getUserDoc(user.uid) as DocumentData | null
-    if (userDoc) setIdentityStatement(userDoc.identityStatement ?? '')
 
-    const [habitDocs, logs, todosDocs, medDocs, vitalsLogs, pomoDocs, xpDocs, xpEvents, sleepDocs, screenDocs] = await Promise.all([
-      queryDocuments('habits', [where('userId', '==', user.uid), where('isActive', '==', true), orderBy('priority', 'asc')]),
-      queryDocuments('daily_habit_logs', [where('userId', '==', user.uid), where('date', '==', date)]),
-      queryDocuments('todos', [where('userId', '==', user.uid), where('completed', '==', false), where('priority', '==', 1), orderBy('createdAt', 'asc'), limit(5)]),
-      queryDocuments('medications', [where('userId', '==', user.uid), where('isActive', '==', true)]),
-      queryDocuments('vitals_logs', [where('userId', '==', user.uid), where('date', '==', date)]),
-      queryDocuments('pomodoro_sessions', [where('userId', '==', user.uid), where('date', '==', date)]),
-      queryDocuments('user_xp', [where('userId', '==', user.uid)]),
-      queryDocuments('xp_events', [where('userId', '==', user.uid), where('date', '==', date)]),
-      queryDocuments('sleep_logs', [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1)]),
-      queryDocuments('screen_time_logs', [where('userId', '==', user.uid), where('date', '==', date)]),
-    ])
-
-    const doneSet = new Set(logs.map(l => l.habitId as string))
-    setHabitsDone(doneSet)
-    setIdentityVotes(doneSet.size)
-    setHabits(habitDocs.map(h => ({ id: h.id, habitId: h.id, name: h.name, completed: doneSet.has(h.id), priority: h.priority ?? 2, emoji: h.emoji })))
-    setP1Todos(todosDocs.map(t => ({ id: t.id, title: t.title, priority: t.priority, category: t.category, completed: false })))
-    setMedications(medDocs.map(m => ({ id: m.id, name: m.name, dosage: m.dosage, frequency: m.frequency })))
-
-    if (vitalsLogs.length > 0) {
-      const taken = vitalsLogs[0].medsTaken ?? []
-      setMedsTaken(new Set(taken))
-    }
-
-    if (xpDocs.length > 0) setXpLevel(xpDocs[0].level ?? 1)
-    setXpToday(xpEvents.reduce((s: number, e: DocumentData) => s + (e.xpEarned ?? 0), 0))
-
-    setTodayStats({
-      sleep: sleepDocs[0]?.hoursSlept ?? null,
-      weight: null,
-      screen: screenDocs[0]?.minutesUsed ?? null,
-      focus: pomoDocs.length,
-    })
-
-    // Activity logs
-    const alDocs = await queryDocuments('activity_logs', [where('userId', '==', user.uid), where('date', '==', date)])
-    setActivityLogs(alDocs.map(d => ({
-      id: d.id, text: d.text ?? '', mood: d.mood ?? null,
-      activityTag: d.activityTag ?? null,
-      timestamp: typeof d.timestamp === 'string' ? d.timestamp : (d.timestamp?.toDate?.()?.toISOString?.() ?? new Date().toISOString()),
-      hour: d.hour ?? 0,
-    })).sort((a, b) => a.timestamp.localeCompare(b.timestamp)))
-
-    // Daily tasks
-    const dtDocs = await queryDocuments('daily_tasks', [where('userId', '==', user.uid)])
-    setDailyTasks(dtDocs.map(d => ({ id: d.id, title: d.title, targetCount: d.targetCount ?? 10, emoji: d.emoji ?? '🎯', color: d.color ?? '#14b8a6' })))
-
-    const dtLogDocs = await queryDocuments('daily_task_logs', [where('userId', '==', user.uid), where('date', '==', date)])
-    const counts: Record<string, number> = {}
-    for (const l of dtLogDocs) counts[l.taskId] = (counts[l.taskId] ?? 0) + (l.count ?? 0)
-    setDailyTaskCounts(counts)
-
-    // 7-day summaries for habit dots + weekly avg
-    const [summaries7d, counterDocs, pendingTodos] = await Promise.all([
+    const [
+      habitDocs, logDocs, todosDocs, medDocs, vitalsLogs,
+      pomoDocs, xpDocs, xpEvents, sleepDocs, summaries7d,
+      counterDocs, pendingTodos, dtDocs, dtLogDocs,
+    ] = await Promise.all([
+      queryDocuments('habits',          [where('userId', '==', user.uid), where('isActive', '==', true), orderBy('priority', 'asc')]),
+      queryDocuments('daily_habit_logs',[where('userId', '==', user.uid), where('date', '==', date)]),
+      queryDocuments('todos',           [where('userId', '==', user.uid), where('completed', '==', false), where('priority', '==', 1), orderBy('createdAt', 'asc'), limit(5)]),
+      queryDocuments('medications',     [where('userId', '==', user.uid), where('isActive', '==', true)]),
+      queryDocuments('vitals_logs',     [where('userId', '==', user.uid), where('date', '==', date)]),
+      queryDocuments('pomodoro_sessions',[where('userId', '==', user.uid), where('date', '==', date), orderBy('timestamp', 'desc')]),
+      queryDocuments('user_xp',         [where('userId', '==', user.uid)]),
+      queryDocuments('xp_events',       [where('userId', '==', user.uid), where('date', '==', date)]),
+      queryDocuments('sleep_logs',      [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1)]),
       queryDocuments('daily_summaries', [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(7)]),
       queryDocuments('custom_counters', [where('userId', '==', user.uid)]),
-      queryDocuments('todos', [where('userId', '==', user.uid), where('completed', '==', false)]),
+      queryDocuments('todos',           [where('userId', '==', user.uid), where('completed', '==', false)]),
+      queryDocuments('daily_tasks',     [where('userId', '==', user.uid)]),
+      queryDocuments('daily_task_logs', [where('userId', '==', user.uid), where('date', '==', date)]),
     ])
 
+    const doneSet = new Set(logDocs.map(l => l.habitId as string))
+    setHabitsDone(doneSet)
+    setHabits(habitDocs.map(h => ({
+      id: h.id, habitId: h.id, name: h.name, emoji: h.emoji,
+      priority: h.priority ?? 2, scheduledTime: h.scheduledTime ?? 'anytime',
+    })))
+    setP1Todos(todosDocs.map(t => ({ id: t.id, title: t.title, priority: t.priority, category: t.category })))
+    setMedications(medDocs.map(m => ({ id: m.id, name: m.name, dosage: m.dosage, frequency: m.frequency })))
+
+    if (vitalsLogs.length > 0) setMedsTaken(new Set(vitalsLogs[0].medsTaken ?? []))
+
+    const xpTotalVal = xpDocs[0]?.xpTotal ?? 0
+    setXpTotal(xpTotalVal)
+    const todayXp = xpEvents.reduce((s: number, e: DocumentData) => s + (e.xpEarned ?? 0), 0)
+    setXpToday(todayXp)
+
+    setTodayStats({ sleep: sleepDocs[0]?.hoursSlept ?? null, focus: pomoDocs.length })
+
+    // Focus sessions today
+    setFocusSessions(pomoDocs.slice(0, 6).map(d => ({
+      taskText: d.taskText ?? 'Focus session',
+      durationMins: d.durationMins ?? 25,
+      timestamp: typeof d.timestamp === 'string' ? d.timestamp : (d.timestamp?.toDate?.()?.toISOString?.() ?? ''),
+    })))
+
+    // Focus streak: consecutive days with sessions
+    const allPomoDocs = await queryDocuments('pomodoro_sessions', [
+      where('userId', '==', user.uid), orderBy('date', 'desc'), limit(60),
+    ])
+    const focusDates = new Set(allPomoDocs.map((d: DocumentData) => d.date as string))
+    let fs = 0
+    for (let i = 0; i <= 60; i++) {
+      if (focusDates.has(getDateStr(i))) fs++
+      else if (i > 0) break
+    }
+    setFocusStreak(fs)
+
+    // Habit dots
     const dots = summaries7d.slice(0, 7).reverse().map((s: DocumentData) => ({
-      date: s.date as string,
-      done: s.habitsDone ?? 0,
-      total: s.habitsTotal ?? 0,
+      date: s.date as string, done: s.habitsDone ?? 0, total: s.habitsTotal ?? 0,
     }))
     setHabitDots(dots)
-
-    const validDays = dots.filter(d => d.total > 0)
+    const validDays = dots.filter((d: HabitDot) => d.total > 0)
     if (validDays.length > 0) {
-      const avg = validDays.reduce((s, d) => s + d.done / d.total, 0) / validDays.length
+      const avg = validDays.reduce((s: number, d: HabitDot) => s + d.done / d.total, 0) / validDays.length
       setWeeklyHabitPct(Math.round(avg * 100))
     }
 
+    // Counters
     setTopCounters(
       counterDocs
         .sort((a: DocumentData, b: DocumentData) =>
@@ -196,24 +208,34 @@ export default function CommandCenterPage() {
 
     setTodoStats({
       personal: pendingTodos.filter((t: DocumentData) => t.category === 'personal').length,
-      work: pendingTodos.filter((t: DocumentData) => t.category === 'work').length,
+      work:     pendingTodos.filter((t: DocumentData) => t.category === 'work').length,
     })
+
+    // Daily tasks
+    setDailyTasks(dtDocs.map(d => ({ id: d.id, title: d.title, targetCount: d.targetCount ?? 10, emoji: d.emoji ?? '🎯', color: d.color ?? '#14b8a6' })))
+    const counts: Record<string, number> = {}
+    for (const l of dtLogDocs) counts[l.taskId] = (counts[l.taskId] ?? 0) + (l.count ?? 0)
+    setDailyTaskCounts(counts)
 
     setDataLoaded(true)
   }
 
-  async function toggleHabit(habit: HabitLog) {
+  async function toggleHabit(habit: HabitRow) {
     if (!user) return
     const newDone = new Set(habitsDone)
-    if (newDone.has(habit.habitId)) newDone.delete(habit.habitId)
+    const wasDone = newDone.has(habit.habitId)
+    if (wasDone) { newDone.delete(habit.habitId) }
     else {
       newDone.add(habit.habitId)
-      await addDocument('xp_events', { userId: user.uid, date, eventType: 'habit', xpEarned: 10, description: `Completed habit: ${habit.name}` })
-      setXpToday(prev => prev + 10)
+      await addDocument('xp_events', { userId: user.uid, date, eventType: 'habit', xpEarned: 10, description: `Completed: ${habit.name}` })
+      setXpToday(p => p + 10)
+      setXpTotal(p => p + 10)
+      // Show XP pop-up
+      const id = ++xpPopIdRef.current
+      setXpPops(p => [...p, { id, amount: 10, habitId: habit.habitId }])
     }
     setHabitsDone(newDone)
-    setIdentityVotes(newDone.size)
-    await addDocument('daily_habit_logs', { userId: user.uid, date, habitId: habit.habitId, completed: newDone.has(habit.habitId), completedAt: new Date().toISOString() })
+    await addDocument('daily_habit_logs', { userId: user.uid, date, habitId: habit.habitId, completed: !wasDone, completedAt: new Date().toISOString() })
   }
 
   async function toggleMed(medId: string) {
@@ -258,35 +280,27 @@ export default function CommandCenterPage() {
     if (!user || aiLoading) return
     setAiLoading(true)
     try {
-      const completedTodayDocs = await queryDocuments('todos', [
-        where('userId', '==', user.uid),
-        where('completed', '==', true),
-        where('completedAt', '>=', date),
+      const completedToday = await queryDocuments('todos', [
+        where('userId', '==', user.uid), where('completed', '==', true), where('completedAt', '>=', date),
       ])
       const res = await fetch('/api/ai/daily-brief', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          date,
-          timeOfDay,
+          date, timeOfDay,
           habits: { done: habitsDone.size, total: habits.length },
-          todos: { p1Pending: p1Todos.length, completedToday: completedTodayDocs.length },
-          sleep: todayStats.sleep,
-          focusSessions: todayStats.focus,
-          weeklyHabitPct,
-          xpLevel,
-          xpToday,
-          todoStats,
-          topCounters: topCounters.map(c => ({
-            name: c.name, currentCount: c.currentCount, targetCount: c.targetCount
-          })),
+          todos: { p1Pending: p1Todos.length, completedToday: completedToday.length },
+          sleep: todayStats.sleep, focusSessions: todayStats.focus,
+          weeklyHabitPct, xpLevel: xpProgress(xpTotal).level,
+          xpToday, todoStats,
+          topCounters: topCounters.map(c => ({ name: c.name, currentCount: c.currentCount, targetCount: c.targetCount })),
         }),
       })
       const data = await res.json()
       setAiBrief(data.brief ?? '')
       setAiLoaded(true)
     } catch {
-      setAiBrief("You're making progress — keep going!")
+      setAiBrief("Focus on your top priority — that's the highest leverage action right now.")
       setAiLoaded(true)
     }
     setAiLoading(false)
@@ -301,108 +315,304 @@ export default function CommandCenterPage() {
       userId: user.uid, date,
       weight: weight ? parseFloat(weight) : null,
       habitsDone: habitsDone.size, habitsTotal: habits.length,
-      identityVotes: habitsDone.size,
-      oneThing: oneThing || null, burnoutModeUsed: burnoutMode,
+      oneThing: oneThing || null,
     }))
     promises.push(addDocument('xp_events', { userId: user.uid, date, eventType: 'command_center', xpEarned: 20, description: 'Saved Daily Command Center' }))
     await Promise.all(promises)
-    setXpToday(prev => prev + 20)
-    setSaving(false)
-    setSaved(true)
+    setXpToday(p => p + 20)
+    setSaving(false); setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
 
+  // ── Derived ──
+  const { level: xpLevel, earned: xpEarned, needed: xpNeeded } = xpProgress(xpTotal)
+  const xpBarPct = Math.round((xpEarned / xpNeeded) * 100)
   const displayHabits = burnoutMode ? habits.filter(h => h.priority === 1).slice(0, 3) : habits
-  const timelineHours = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i)
+  const habitDoneCount = habitsDone.size
+  const habitTotal = displayHabits.length
+  const habitPct = habitTotal > 0 ? Math.round((habitDoneCount / habitTotal) * 100) : 0
+  const habitRingColor = habitPct >= 80 ? '#22c55e' : habitPct >= 50 ? '#f59e0b' : '#ef4444'
+  const focusTotalMins = focusSessions.reduce((s, f) => s + f.durationMins, 0)
+  const isAllMedsTaken = medications.length > 0 && medsTaken.size === medications.length
 
   function formatRemaining() {
-    if (remainingMins <= 0) return '⏰ Day is done — reflect & rest'
-    if (remainingMins < 60) return `⏰ ${remainingMins}min left — finish strong!`
-    const h = Math.floor(remainingMins / 60)
-    const m = remainingMins % 60
-    if (remainingMins < 120) return `🔥 ${h}h ${m}m left — make it count`
-    if (remainingMins < 240) return `⚡ ${h}h ${m}m remaining`
-    return `🌅 ${h}h left in your day`
+    if (remaining <= 0) return '⏰ Day is done — reflect & rest'
+    if (remaining < 60)  return `⏰ ${remaining}min left`
+    const h = Math.floor(remaining / 60), m = remaining % 60
+    if (remaining < 120) return `🔥 ${h}h ${m}m — sprint!`
+    return `${h}h ${m}m remaining`
   }
 
-  return (
-    <div className="pb-4 space-y-4 animate-fade-in">
+  // ── Greeting ──
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const greetingEmoji = hour < 12 ? '🌅' : hour < 17 ? '☀️' : '🌙'
 
-      {/* ─── DAY PROGRESS ─── */}
-      <div className="card" style={{ border: `1px solid ${urgencyColor}40` }}>
-        <div className="flex items-start justify-between mb-3">
+  return (
+    <div className="pb-6 space-y-4 animate-fade-in">
+
+      {/* ═══════════════════════════════════════════════════════════
+          1. HERO HEADER — Greeting + Day ring + XP bar
+          Psychological: Identity-based framing + progress visibility
+      ══════════════════════════════════════════════════════════════ */}
+      <div className="card space-y-3" style={{ border: `1px solid ${urgencyColor}30` }}>
+        <div className="flex items-start justify-between">
           <div>
             <p className="text-xs text-muted">
               {now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
             </p>
-            <p className="text-sm font-semibold mt-0.5" style={{ color: urgencyColor }}>{formatRemaining()}</p>
+            <p className="text-lg font-bold mt-0.5">{greetingEmoji} {greeting}!</p>
+            <p className="text-xs mt-0.5" style={{ color: urgencyColor }}>{formatRemaining()}</p>
           </div>
-          <div className="text-right flex-shrink-0 ml-3">
-            <p className="text-3xl font-bold leading-none" style={{ color: urgencyColor }}>{dayPct}%</p>
-            <p className="text-[10px] text-muted mt-0.5">day used</p>
+          {/* Day progress ring */}
+          <div className="relative flex-shrink-0" style={{ width: 64, height: 64 }}>
+            <svg width="64" height="64" viewBox="0 0 64 64" className="-rotate-90">
+              <circle cx="32" cy="32" r="26" fill="none" strokeWidth="5" stroke="var(--surface-2)" />
+              <circle cx="32" cy="32" r="26" fill="none" strokeWidth="5"
+                stroke={urgencyColor}
+                strokeDasharray={`${2 * Math.PI * 26}`}
+                strokeDashoffset={`${2 * Math.PI * 26 * (1 - dayPct / 100)}`}
+                strokeLinecap="round"
+                style={{ transition: 'stroke-dashoffset 1s linear' }} />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-sm font-bold leading-none" style={{ color: urgencyColor }}>{dayPct}%</span>
+              <span className="text-[8px] text-muted">day</span>
+            </div>
           </div>
         </div>
-        <div className="relative w-full rounded-full h-4 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
-          <div className="h-full rounded-full transition-all duration-1000"
-            style={{ width: `${dayPct}%`, background: `linear-gradient(90deg, #14b8a6, ${urgencyColor})` }} />
-          {dayPct > 2 && dayPct < 98 && (
-            <div className="absolute top-0 bottom-0 w-0.5 bg-white opacity-80" style={{ left: `${dayPct}%` }} />
-          )}
+
+        {/* XP progress bar toward next level */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                style={{ background: 'rgba(168,85,247,0.15)', color: '#a855f7' }}>
+                Lv {xpLevel}
+              </span>
+              {xpToday > 0 && (
+                <span className="text-xs" style={{ color: '#a855f7' }}>+{xpToday} today</span>
+              )}
+            </div>
+            <span className="text-[10px] text-muted">{xpEarned}/{xpNeeded} XP</span>
+          </div>
+          <div className="w-full rounded-full h-2 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+            <div className="h-full rounded-full transition-all duration-700"
+              style={{ width: `${xpBarPct}%`, background: 'linear-gradient(90deg, #a855f7, #818cf8)' }} />
+          </div>
         </div>
-        <div className="flex justify-between mt-1.5">
-          <span className="text-[10px] text-muted">6 AM</span>
-          <span className="text-[10px] font-medium" style={{ color: urgencyColor }}>
-            {now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-          </span>
-          <span className="text-[10px] text-muted">11 PM</span>
+
+        {/* Sleep + Focus strip */}
+        <div className="flex gap-2">
+          <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl"
+            style={{ background: 'var(--surface-2)' }}>
+            <span className="text-base">😴</span>
+            <div>
+              <p className="text-[10px] text-muted">Sleep</p>
+              <p className="text-sm font-bold" style={{ color: todayStats.sleep && todayStats.sleep < 6 ? '#ef4444' : '#818cf8' }}>
+                {todayStats.sleep ? `${todayStats.sleep}h` : '—'}
+              </p>
+            </div>
+          </div>
+          <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl"
+            style={{ background: 'var(--surface-2)' }}>
+            <span className="text-base">🍅</span>
+            <div>
+              <p className="text-[10px] text-muted">Focus</p>
+              <p className="text-sm font-bold" style={{ color: '#14b8a6' }}>
+                {todayStats.focus} {focusTotalMins > 0 && <span className="text-[10px] text-muted font-normal">({focusTotalMins}m)</span>}
+              </p>
+            </div>
+          </div>
+          <Link href="/now" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs"
+            style={{ background: 'rgba(20,184,166,0.15)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.3)' }}>
+            ▶ Focus
+          </Link>
         </div>
       </div>
 
-      {/* ─── XP + STATS STRIP ─── */}
-      <div className="grid grid-cols-4 gap-2">
-        <Link href="/gamification" className="card-sm flex flex-col items-center justify-center text-center">
-          <p className="text-xs text-muted">Level</p>
-          <p className="text-xl font-bold" style={{ color: '#a855f7' }}>{xpLevel}</p>
-          {xpToday > 0 && <p className="text-[9px]" style={{ color: '#a855f7' }}>+{xpToday} XP</p>}
-        </Link>
-        <div className="card-sm text-center">
-          <p className="text-xs text-muted">😴 Sleep</p>
-          <p className="text-lg font-bold" style={{ color: todayStats.sleep && todayStats.sleep < 6 ? '#ef4444' : '#818cf8' }}>
-            {todayStats.sleep ?? '—'}
-          </p>
+      {/* ═══════════════════════════════════════════════════════════
+          2. AI COACH — loads automatically, contextual
+          Psychological: Implementation intention / next-action framing
+      ══════════════════════════════════════════════════════════════ */}
+      <div className="card" style={{ border: '1px solid rgba(168,85,247,0.2)' }}>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-sm flex items-center gap-2">🤖 AI Coach</h3>
+          <button onClick={() => { setAiLoaded(false); loadAiBrief() }} disabled={aiLoading}
+            className="text-[10px] px-2.5 py-1 rounded-lg disabled:opacity-40"
+            style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
+            {aiLoading ? '⏳' : '↻'}
+          </button>
         </div>
-        <div className="card-sm text-center">
-          <p className="text-xs text-muted">📱 Screen</p>
-          <p className="text-lg font-bold" style={{ color: todayStats.screen && todayStats.screen > 120 ? '#ef4444' : 'var(--foreground)' }}>
-            {todayStats.screen ?? '—'}
-          </p>
-        </div>
-        <div className="card-sm text-center">
-          <p className="text-xs text-muted">🍅 Focus</p>
-          <p className="text-lg font-bold" style={{ color: '#14b8a6' }}>{todayStats.focus}</p>
-        </div>
+        {aiLoading ? (
+          <div className="flex items-center gap-1.5 py-1">
+            {[0, 0.15, 0.3].map((d, i) => (
+              <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7', animationDelay: `${d}s` }} />
+            ))}
+            <span className="text-xs text-muted ml-1">Analysing your data…</span>
+          </div>
+        ) : aiLoaded ? (
+          <p className="text-sm leading-relaxed">{aiBrief}</p>
+        ) : (
+          <p className="text-xs text-muted">Loading insights…</p>
+        )}
       </div>
 
-      {/* ─── 7-DAY HABIT STREAK ─── */}
+      {/* ═══════════════════════════════════════════════════════════
+          3. ONE THING — Focused intention for today
+          Psychological: Implementation intention
+      ══════════════════════════════════════════════════════════════ */}
+      <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+        style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.25)' }}>
+        <span className="text-xl flex-shrink-0">⭐</span>
+        <input type="text" value={oneThing} onChange={e => setOneThing(e.target.value)}
+          placeholder="My one non-negotiable task today…"
+          className="flex-1 text-sm font-medium outline-none"
+          style={{ background: 'transparent', color: '#818cf8' }} />
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════
+          4. P1 TODOS — Highest psychological urgency
+          Psychological: Cognitive load reduction — only top 5 shown
+      ══════════════════════════════════════════════════════════════ */}
+      {p1Todos.length > 0 && (
+        <section className="card">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm flex items-center gap-1.5">🔴 Must Do Today</h3>
+            <Link href="/todos" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
+          </div>
+          <div className="space-y-2">
+            {p1Todos.map(t => (
+              <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                style={{ background: 'var(--surface-2)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#ef4444' }} />
+                <span className="text-sm flex-1 leading-snug">{t.title}</span>
+                <Link href="/now"
+                  className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
+                  style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>▶</Link>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Todo inbox counts */}
+      {(todoStats.personal > 0 || todoStats.work > 0) && (
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { href: '/todos?tab=personal', icon: '👤', label: 'Personal', count: todoStats.personal },
+            { href: '/todos?tab=work',     icon: '💼', label: 'Work',     count: todoStats.work },
+          ].map(s => (
+            <Link key={s.href} href={s.href}
+              className="card-sm flex items-center gap-3 transition-opacity active:opacity-70">
+              <span className="text-xl">{s.icon}</span>
+              <div>
+                <p className="text-xs text-muted">{s.label}</p>
+                <p className="text-xl font-bold" style={{ color: s.count > 5 ? '#f59e0b' : 'var(--foreground)' }}>{s.count}</p>
+                <p className="text-[10px] text-muted">open</p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════
+          5. HABITS — with progress ring + engagement loop
+          Psychological: Variable reward (streak), progress visibility
+      ══════════════════════════════════════════════════════════════ */}
+      <section className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm flex items-center gap-2">✅ Habits</h3>
+          <div className="flex items-center gap-2">
+            {/* Habit completion ring */}
+            <div className="relative" style={{ width: 36, height: 36 }}>
+              <svg width="36" height="36" viewBox="0 0 36 36" className="-rotate-90">
+                <circle cx="18" cy="18" r="14" fill="none" strokeWidth="3.5" stroke="var(--surface-2)" />
+                <circle cx="18" cy="18" r="14" fill="none" strokeWidth="3.5"
+                  stroke={habitRingColor}
+                  strokeDasharray={`${2 * Math.PI * 14}`}
+                  strokeDashoffset={`${2 * Math.PI * 14 * (1 - habitPct / 100)}`}
+                  strokeLinecap="round"
+                  style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
+              </svg>
+              <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold"
+                style={{ color: habitRingColor }}>{habitPct}%</span>
+            </div>
+            <span className="text-xs text-muted">{habitDoneCount}/{habitTotal}</span>
+            <Link href="/habits" className="text-xs" style={{ color: '#14b8a6' }}>Edit →</Link>
+          </div>
+        </div>
+
+        {habits.length === 0 ? (
+          <div className="text-center py-6">
+            <p className="text-sm text-muted mb-3">No habits set up yet.</p>
+            <Link href="/habits" className="text-sm font-medium px-4 py-2 rounded-xl"
+              style={{ background: '#14b8a6', color: 'white' }}>Set up habits →</Link>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {displayHabits.map(habit => {
+              const done = habitsDone.has(habit.habitId)
+              const pop  = xpPops.find(p => p.habitId === habit.habitId)
+              return (
+                <button key={habit.id} onClick={() => toggleHabit(habit)}
+                  className="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
+                  style={{
+                    background: done ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)',
+                    border: done ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
+                    transform: done ? 'none' : 'none',
+                  }}>
+                  {pop && <XpPop amount={pop.amount} onDone={() => setXpPops(p => p.filter(x => x.id !== pop.id))} />}
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all ${done ? '' : 'border-2'}`}
+                    style={done
+                      ? { background: '#22c55e', color: 'white' }
+                      : { borderColor: habit.priority === 1 ? '#ef4444' : habit.priority === 2 ? '#f59e0b' : '#6b7280' }}>
+                    {done ? '✓' : ''}
+                  </span>
+                  <span className="text-sm flex-1 leading-snug"
+                    style={{ textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--muted)' : 'var(--foreground)' }}>
+                    {habit.emoji && <span className="mr-1">{habit.emoji}</span>}{habit.name}
+                  </span>
+                  {done && <span className="text-xs font-bold" style={{ color: '#22c55e' }}>✓</span>}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Habit completion celebration */}
+        {habitTotal > 0 && habitDoneCount === habitTotal && (
+          <div className="mt-3 text-center py-2 rounded-xl"
+            style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
+            <p className="text-sm font-semibold" style={{ color: '#22c55e' }}>🎉 All habits done today! +10 XP each</p>
+          </div>
+        )}
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          6. 7-DAY HABIT STREAK — visual trend
+          Psychological: Streak loss aversion (don't break the chain)
+      ══════════════════════════════════════════════════════════════ */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm flex items-center gap-2">📈 This Week</h3>
+          <h3 className="font-semibold text-sm">📈 This Week</h3>
           {weeklyHabitPct != null && (
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-              style={{ background: weeklyHabitPct >= 70 ? 'rgba(34,197,94,0.15)' : weeklyHabitPct >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)', color: weeklyHabitPct >= 70 ? '#22c55e' : weeklyHabitPct >= 40 ? '#f59e0b' : '#ef4444' }}>
+              style={{
+                background: weeklyHabitPct >= 70 ? 'rgba(34,197,94,0.15)' : weeklyHabitPct >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                color:      weeklyHabitPct >= 70 ? '#22c55e'              : weeklyHabitPct >= 40 ? '#f59e0b'               : '#ef4444',
+              }}>
               {weeklyHabitPct}% avg
             </span>
           )}
         </div>
         <div className="flex justify-between gap-1">
           {Array.from({ length: 7 }).map((_, i) => {
-            const d = new Date()
-            d.setDate(d.getDate() - (6 - i))
+            const d    = new Date(); d.setDate(d.getDate() - (6 - i))
             const dStr = d.toISOString().split('T')[0]
-            const dot = habitDots.find(h => h.date === dStr)
-            const pct = dot?.total ? dot.done / dot.total : 0
+            const dot  = habitDots.find(h => h.date === dStr)
+            const pct  = dot?.total ? dot.done / dot.total : 0
             const dayLabel = d.toLocaleDateString('en-IN', { weekday: 'short' }).slice(0, 2)
-            const isToday = dStr === date
+            const isToday  = dStr === date
             let bg = 'var(--surface-2)'
             if (pct >= 0.9) bg = '#22c55e'
             else if (pct >= 0.6) bg = '#86efac'
@@ -417,124 +627,42 @@ export default function CommandCenterPage() {
                 ) : <span className="text-[9px]">&nbsp;</span>}
                 <div className="w-full rounded-lg"
                   style={{ height: 28, background: bg, border: isToday ? '2px solid #14b8a6' : '1px solid var(--border)', opacity: dot ? 1 : 0.35 }} />
-                <span className="text-[10px]" style={{ color: isToday ? '#14b8a6' : 'var(--muted)', fontWeight: isToday ? 600 : 400 }}>
+                <span className="text-[10px]"
+                  style={{ color: isToday ? '#14b8a6' : 'var(--muted)', fontWeight: isToday ? 600 : 400 }}>
                   {dayLabel}
                 </span>
               </div>
             )
           })}
         </div>
-        <div className="flex items-center gap-3 mt-2 justify-end">
-          {[['#22c55e', '90%+'], ['#86efac', '60%+'], ['#fcd34d', '30%+'], ['#fca5a5', '<30%']].map(([color, label]) => (
-            <div key={label} className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-sm" style={{ background: color }} />
-              <span className="text-[9px] text-muted">{label}</span>
-            </div>
-          ))}
-        </div>
       </div>
 
-      {/* ─── AI MOTIVATIONAL BRIEF ─── */}
-      <div className="card" style={{ border: '1px solid rgba(168,85,247,0.25)' }}>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-semibold text-sm flex items-center gap-2">🤖 AI Coach</h3>
-          <button onClick={loadAiBrief} disabled={aiLoading}
-            className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-50"
-            style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
-            {aiLoading ? '⏳' : '↻ Refresh'}
-          </button>
-        </div>
-        {aiLoading && !aiLoaded ? (
-          <div className="flex items-center gap-2 py-2">
-            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7' }} />
-            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7', animationDelay: '0.2s' }} />
-            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7', animationDelay: '0.4s' }} />
-            <span className="text-xs text-muted ml-1">Analysing your data...</span>
-          </div>
-        ) : aiLoaded ? (
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--foreground)' }}>{aiBrief}</p>
-        ) : (
-          <p className="text-xs text-muted">
-            {habitsDone.size}/{habits.length} habits · {p1Todos.length} P1 pending · {todayStats.focus} focus session{todayStats.focus !== 1 ? 's' : ''}
-          </p>
-        )}
-      </div>
-
-      {/* ─── ONE THING ─── */}
-      <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl" style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.25)' }}>
-        <span className="text-xl flex-shrink-0">⭐</span>
-        <input type="text" value={oneThing} onChange={e => setOneThing(e.target.value)}
-          placeholder="One must-do for today"
-          className="flex-1 text-sm outline-none font-medium"
-          style={{ background: 'transparent', color: '#818cf8' }} />
-      </div>
-
-      {/* ─── P1 TODOS ─── */}
-      {p1Todos.length > 0 && (
-        <section className="card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm flex items-center gap-2">🔴 Top Priority</h3>
-            <Link href="/todos" className="text-xs" style={{ color: '#14b8a6' }}>See all →</Link>
-          </div>
-          <div className="space-y-2">
-            {p1Todos.map(t => (
-              <div key={t.id} className="flex items-center gap-3 px-3 py-2 rounded-xl"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#ef4444' }} />
-                <span className="text-sm flex-1">{t.title}</span>
-                <Link href="/now" className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>▶</Link>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ─── TODO STATS ─── */}
-      {(todoStats.personal > 0 || todoStats.work > 0) && (
-        <div className="grid grid-cols-2 gap-2">
-          <Link href="/todos?tab=personal" className="card-sm flex items-center gap-3 transition-opacity active:opacity-70">
-            <span className="text-xl">👤</span>
-            <div>
-              <p className="text-xs text-muted">Personal</p>
-              <p className="text-xl font-bold" style={{ color: todoStats.personal > 5 ? '#f59e0b' : 'var(--foreground)' }}>{todoStats.personal}</p>
-              <p className="text-[10px] text-muted">open todos</p>
-            </div>
-          </Link>
-          <Link href="/todos?tab=work" className="card-sm flex items-center gap-3 transition-opacity active:opacity-70">
-            <span className="text-xl">💼</span>
-            <div>
-              <p className="text-xs text-muted">Work</p>
-              <p className="text-xl font-bold" style={{ color: todoStats.work > 5 ? '#f59e0b' : 'var(--foreground)' }}>{todoStats.work}</p>
-              <p className="text-[10px] text-muted">open todos</p>
-            </div>
-          </Link>
-        </div>
-      )}
-
-      {/* ─── TOP COUNTERS ─── */}
+      {/* ═══════════════════════════════════════════════════════════
+          7. COUNTER GOALS — progress toward commitments
+      ══════════════════════════════════════════════════════════════ */}
       {topCounters.length > 0 && (
         <section className="card">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm flex items-center gap-2">🎯 Counter Goals</h3>
-            <Link href="/counters" className="text-xs" style={{ color: '#14b8a6' }}>See all →</Link>
+            <h3 className="font-semibold text-sm">🎯 Counter Goals</h3>
+            <Link href="/counters" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
           </div>
           <div className="space-y-3">
             {topCounters.map(c => {
-              const pct = Math.min((c.currentCount / c.targetCount) * 100, 100)
+              const pct  = Math.min((c.currentCount / c.targetCount) * 100, 100)
               const done = c.currentCount >= c.targetCount
               return (
                 <div key={c.id}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm">{c.emoji} {c.name}</span>
                     <span className="text-xs font-bold" style={{ color: done ? '#22c55e' : c.color }}>
-                      {c.currentCount} / {c.targetCount}
+                      {c.currentCount}/{c.targetCount}
                     </span>
                   </div>
-                  <div className="relative w-full rounded-full h-2 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
-                    <div className="h-full rounded-full transition-all"
+                  <div className="relative w-full rounded-full h-2.5 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                    <div className="h-full rounded-full transition-all duration-700"
                       style={{ width: `${pct}%`, background: done ? '#22c55e' : c.color }} />
                   </div>
-                  <p className="text-[10px] text-muted mt-0.5 text-right">{Math.round(pct)}% complete</p>
+                  <p className="text-[10px] text-muted mt-0.5 text-right">{Math.round(pct)}%{done ? ' ✓ Complete!' : ''}</p>
                 </div>
               )
             })}
@@ -542,34 +670,12 @@ export default function CommandCenterPage() {
         </section>
       )}
 
-      {/* ─── MEDICATIONS ─── */}
-      {medications.length > 0 && (
-        <section className="card">
-          <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">💊 Medications</h3>
-          <div className="space-y-2">
-            {medications.map(med => {
-              const taken = medsTaken.has(med.id)
-              return (
-                <button key={med.id} onClick={() => toggleMed(med.id)}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left"
-                  style={{ background: taken ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)', border: taken ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)' }}>
-                  <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 font-bold"
-                    style={{ background: taken ? '#22c55e' : 'transparent', border: taken ? 'none' : '2px solid var(--border)', color: 'white' }}>
-                    {taken ? '✓' : ''}
-                  </span>
-                  <span className="text-sm flex-1">{med.name}{med.dosage && ` · ${med.dosage}`}</span>
-                  <span className="text-xs text-muted capitalize">{med.frequency}</span>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* ─── DAILY TASKS (repeating, resets each day) ─── */}
+      {/* ═══════════════════════════════════════════════════════════
+          8. DAILY TASKS — repeating counters
+      ══════════════════════════════════════════════════════════════ */}
       <section className="card">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm flex items-center gap-2">📋 Daily Tasks</h3>
+          <h3 className="font-semibold text-sm">📋 Daily Tasks</h3>
           <button onClick={() => setShowAddDailyTask(!showAddDailyTask)}
             className="text-xs px-2.5 py-1 rounded-lg"
             style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>+ Add</button>
@@ -610,8 +716,8 @@ export default function CommandCenterPage() {
           <div className="space-y-3">
             {dailyTasks.map(task => {
               const count = dailyTaskCounts[task.id] ?? 0
-              const pct = Math.min((count / task.targetCount) * 100, 100)
-              const done = count >= task.targetCount
+              const pct   = Math.min((count / task.targetCount) * 100, 100)
+              const done  = count >= task.targetCount
               return (
                 <div key={task.id}>
                   <div className="flex items-center gap-2 mb-1">
@@ -642,136 +748,108 @@ export default function CommandCenterPage() {
         )}
       </section>
 
-      {/* ─── HABITS ─── */}
-      <section className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm flex items-center gap-2"><span>✅</span> Habits</h3>
-          <span className="text-xs text-muted">{habitsDone.size}/{displayHabits.length} · {identityVotes} votes</span>
-        </div>
-        {habits.length === 0 ? (
-          <div className="text-center py-6">
-            <p className="text-sm text-muted mb-3">No habits set up yet.</p>
-            <Link href="/habits" className="text-sm font-medium px-4 py-2 rounded-xl" style={{ background: '#14b8a6', color: 'white' }}>Set up habits →</Link>
+      {/* ═══════════════════════════════════════════════════════════
+          9. MEDICATIONS CHECKLIST
+      ══════════════════════════════════════════════════════════════ */}
+      {medications.length > 0 && (
+        <section className="card">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm">💊 Medications</h3>
+            {isAllMedsTaken && (
+              <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.1)', color: '#22c55e' }}>
+                All taken ✓
+              </span>
+            )}
           </div>
-        ) : (
           <div className="space-y-2">
-            {displayHabits.map(habit => {
-              const done = habitsDone.has(habit.habitId)
+            {medications.map(med => {
+              const taken = medsTaken.has(med.id)
               return (
-                <button key={habit.id} onClick={() => toggleHabit(habit)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left"
-                  style={{ background: done ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)', border: done ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)' }}>
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${done ? 'bg-green-500 text-white' : 'border-2'}`}
-                    style={!done ? { borderColor: 'var(--border)' } : {}}>
-                    {done ? '✓' : ''}
+                <button key={med.id} onClick={() => toggleMed(med.id)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
+                  style={{
+                    background: taken ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)',
+                    border: taken ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
+                  }}>
+                  <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 font-bold transition-all"
+                    style={taken
+                      ? { background: '#22c55e', color: 'white' }
+                      : { border: '2px solid var(--border)', color: 'transparent' }}>
+                    {taken ? '✓' : ''}
                   </span>
-                  <span className="text-sm flex-1" style={{ color: done ? 'var(--muted)' : 'var(--foreground)', textDecoration: done ? 'line-through' : 'none' }}>
-                    {habit.emoji && <span className="mr-1">{habit.emoji}</span>}{habit.name}
-                  </span>
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${habit.priority === 1 ? 'badge-p1' : 'badge-p2'}`}>P{habit.priority}</span>
-                  {done && <span className="text-xs" style={{ color: '#22c55e' }}>+10</span>}
+                  <span className="text-sm flex-1">{med.name}{med.dosage && ` · ${med.dosage}`}</span>
+                  <span className="text-xs text-muted capitalize">{med.frequency}</span>
                 </button>
               )
             })}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
-      {/* ─── ACTIVITY TIMELINE ─── */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm">📍 Today&apos;s Story</h3>
-          <span className="text-xs text-muted">{activityLogs.length} moment{activityLogs.length !== 1 ? 's' : ''}</span>
-        </div>
-        <div className="overflow-x-auto -mx-1 px-1 pb-1">
-          <div className="flex gap-0.5" style={{ minWidth: `${timelineHours.length * 36}px` }}>
-            {timelineHours.map(h => {
-              const logsAtHour = activityLogs.filter(l => l.hour === h)
-              const isCurrentHour = h === hour
-              const isPast = h < hour
-              return (
-                <div key={h} className="flex flex-col items-center flex-1" style={{ minWidth: 34 }}>
-                  <div className="h-14 flex flex-col items-center justify-end gap-0.5 mb-1 w-full">
-                    {logsAtHour.slice(0, 2).map((log, i) => (
-                      <div key={i} title={log.text || log.activityTag || ''}
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-[11px]"
-                        style={{ background: log.activityTag ? `${ACTIVITY_COLORS[log.activityTag] ?? '#14b8a6'}20` : 'rgba(20,184,166,0.12)', border: `1.5px solid ${log.activityTag ? ACTIVITY_COLORS[log.activityTag] ?? '#14b8a6' : '#14b8a6'}` }}>
-                        {log.mood ? MOOD_EMOJIS[log.mood - 1] : log.activityTag ? '•' : '💬'}
-                      </div>
-                    ))}
-                    {logsAtHour.length > 2 && (
-                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold"
-                        style={{ background: 'rgba(20,184,166,0.15)', color: '#14b8a6' }}>+{logsAtHour.length - 2}</div>
-                    )}
-                  </div>
-                  <div className="w-2 rounded-full transition-all"
-                    style={{ height: logsAtHour.length > 0 ? 28 : isCurrentHour ? 20 : 8, background: isCurrentHour ? urgencyColor : logsAtHour.length > 0 ? '#14b8a6' : 'var(--surface-2)', opacity: isPast && !logsAtHour.length ? 0.3 : 1 }} />
-                  <span className="text-[9px] mt-1 font-medium" style={{ color: isCurrentHour ? urgencyColor : 'var(--muted)' }}>
-                    {h === 12 ? '12p' : h > 12 ? `${h - 12}p` : `${h}a`}
-                  </span>
-                </div>
-              )
-            })}
+      {/* ═══════════════════════════════════════════════════════════
+          10. FOCUS SESSIONS TODAY
+      ══════════════════════════════════════════════════════════════ */}
+      {focusSessions.length > 0 && (
+        <section className="card">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm flex items-center gap-2">
+              🍅 Focus Sessions
+              {focusStreak > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>🔥 {focusStreak}d streak</span>}
+            </h3>
+            <Link href="/now" className="text-xs" style={{ color: '#14b8a6' }}>+ Session →</Link>
           </div>
-        </div>
-        {activityLogs.length === 0 ? (
-          <p className="text-xs text-muted text-center pt-2">Tap + to log what you&apos;re doing</p>
-        ) : (
-          <div className="mt-2 space-y-1 max-h-28 overflow-y-auto">
-            {activityLogs.slice(-3).reverse().map(log => (
-              <div key={log.id} className="flex items-center gap-2 text-xs">
-                <span className="text-muted flex-shrink-0">
-                  {new Date(log.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
-                </span>
-                {log.mood && <span>{MOOD_EMOJIS[log.mood - 1]}</span>}
-                {log.activityTag && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px]"
-                    style={{ background: `${ACTIVITY_COLORS[log.activityTag] ?? '#14b8a6'}20`, color: ACTIVITY_COLORS[log.activityTag] ?? '#14b8a6' }}>
-                    {log.activityTag}
-                  </span>
-                )}
-                {log.text && <span className="text-muted truncate">{log.text}</span>}
+          <div className="space-y-2">
+            {focusSessions.map((s, i) => (
+              <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl"
+                style={{ background: 'var(--surface-2)' }}>
+                <span className="text-base">🍅</span>
+                <p className="text-sm flex-1 truncate">{s.taskText}</p>
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                  style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>{s.durationMins}m</span>
               </div>
             ))}
-          </div>
-        )}
-      </div>
-
-      {/* ─── MORNING BLOCK ─── */}
-      {!burnoutMode && (
-        <section className="card">
-          <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><span>🌅</span> Morning</h3>
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <span className="text-xl w-8">⚖️</span>
-              <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
-                placeholder="Weight (kg)" step="0.1"
-                className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-            </div>
-            <button onClick={() => setMedsChecked(!medsChecked)}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm"
-              style={{ background: medsChecked ? 'rgba(20,184,166,0.15)' : 'var(--surface-2)', border: medsChecked ? '1px solid #14b8a6' : '1px solid var(--border)', color: medsChecked ? '#14b8a6' : 'var(--foreground)' }}>
-              💊 All meds taken {medsChecked ? '✓' : ''}
-            </button>
           </div>
         </section>
       )}
 
-      {/* Burnout mode */}
+      {/* ═══════════════════════════════════════════════════════════
+          11. MORNING LOG — weight + burnout mode
+      ══════════════════════════════════════════════════════════════ */}
+      {!burnoutMode && (
+        <section className="card">
+          <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">🌅 Morning Log</h3>
+          <div className="flex items-center gap-3">
+            <span className="text-xl w-8">⚖️</span>
+            <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
+              placeholder="Weight today (kg)" step="0.1"
+              className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+          </div>
+        </section>
+      )}
+
+      {/* Burnout mode toggle */}
       <div className="flex justify-end">
-        <button onClick={() => setBurnoutMode(!burnoutMode)}
+        <button onClick={() => setBurnoutMode(v => !v)}
           className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full"
-          style={{ background: burnoutMode ? 'rgba(99,102,241,0.15)' : 'var(--surface-2)', color: burnoutMode ? '#818cf8' : 'var(--muted)', border: '1px solid var(--border)' }}>
+          style={{
+            background: burnoutMode ? 'rgba(99,102,241,0.15)' : 'var(--surface-2)',
+            color: burnoutMode ? '#818cf8' : 'var(--muted)',
+            border: '1px solid var(--border)',
+          }}>
           {burnoutMode ? '🌙 Rest mode on' : '🌙 Burnout mode'}
         </button>
       </div>
 
+      {/* ═══════════════════════════════════════════════════════════
+          12. SAVE — completes the daily loop (+20 XP)
+      ══════════════════════════════════════════════════════════════ */}
       <button onClick={handleSave} disabled={saving}
-        className="w-full py-3.5 rounded-2xl font-semibold text-sm disabled:opacity-50"
+        className="w-full py-4 rounded-2xl font-semibold text-sm disabled:opacity-50"
         style={{ background: saved ? '#22c55e' : '#14b8a6', color: 'white', boxShadow: '0 4px 15px rgba(20,184,166,0.3)' }}>
-        {saving ? 'Saving...' : saved ? '✓ Saved! +20 XP' : burnoutMode ? '🌙 Save & rest' : '⚡ Save today\'s data'}
+        {saving ? 'Saving…' : saved ? '✓ Saved! +20 XP' : burnoutMode ? '🌙 Save & rest' : '⚡ Save today\'s data'}
       </button>
+
     </div>
   )
 }
