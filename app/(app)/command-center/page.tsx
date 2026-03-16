@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/lib/hooks/useAuth'
 import {
-  addDocument, queryDocuments, updateDocument, deleteDocument,
+  addDocument, queryDocuments, updateDocument,
   updateUserDoc, todayDate, where, orderBy, limit
 } from '@/lib/firebase/db'
 import type { DocumentData } from 'firebase/firestore'
@@ -16,7 +16,7 @@ interface Medication { id: string; name: string; dosage?: string; frequency: str
 interface CounterSummary { id: string; name: string; emoji: string; currentCount: number; targetCount: number; color: string }
 interface HabitDot  { date: string; done: number; total: number }
 interface PomodoroSession { taskText: string; durationMins: number; timestamp: string }
-interface DailyTask { id: string; title: string; targetCount: number; emoji: string; color: string }
+interface NextAction { title: string; type: 'habit' | 'todo' | 'counter' | 'focus'; reason: string; urgency: 'high' | 'medium' | 'low' }
 
 // ─── XP math ────────────────────────────────────────────────────────────────
 const XP_PER_LEVEL = 200
@@ -82,8 +82,9 @@ export default function CommandCenterPage() {
   const [topCounters, setTopCounters] = useState<CounterSummary[]>([])
   const [focusSessions, setFocusSessions] = useState<PomodoroSession[]>([])
   const [focusStreak, setFocusStreak] = useState(0)
-  const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([])
-  const [dailyTaskCounts, setDailyTaskCounts] = useState<Record<string, number>>({})
+  const [dueTodayTodos, setDueTodayTodos] = useState<TodoItem[]>([])
+  const [aiNextActions, setAiNextActions] = useState<NextAction[]>([])
+  const [aiNextLoading, setAiNextLoading] = useState(false)
   const [dataLoaded, setDataLoaded] = useState(false)
 
   // ── UI state ──
@@ -100,12 +101,6 @@ export default function CommandCenterPage() {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiLoaded, setAiLoaded] = useState(false)
 
-  // ── Daily tasks ──
-  const [showAddDailyTask, setShowAddDailyTask] = useState(false)
-  const [newDailyTaskTitle, setNewDailyTaskTitle] = useState('')
-  const [newDailyTaskTarget, setNewDailyTaskTarget] = useState('10')
-  const [newDailyTaskEmoji, setNewDailyTaskEmoji] = useState('🎯')
-
   // ── Auto-refresh every 5 minutes ──
   useEffect(() => {
     if (!user) return
@@ -114,9 +109,10 @@ export default function CommandCenterPage() {
     return () => clearInterval(t)
   }, [user])
 
-  // Auto-load AI brief when data ready
+  // Auto-load AI brief + next actions when data ready
   useEffect(() => {
     if (dataLoaded && !aiLoaded && !aiLoading) loadAiBrief()
+    if (dataLoaded) loadNextActions()
   }, [dataLoaded])
 
   async function loadData() {
@@ -127,7 +123,7 @@ export default function CommandCenterPage() {
     const [
       habitDocs, logDocs, todosDocs, medDocs, vitalsLogs,
       pomoDocs, xpDocs, xpEvents, sleepDocs, summaries7d,
-      counterDocs, pendingTodos, dtDocs, dtLogDocs,
+      counterDocs, pendingTodos, dueTodayDocs,
     ] = await Promise.all([
       queryDocuments('habits',          [where('userId', '==', user.uid), where('isActive', '==', true), orderBy('priority', 'asc')]),
       queryDocuments('daily_habit_logs',[where('userId', '==', user.uid), where('date', '==', date)]),
@@ -141,8 +137,7 @@ export default function CommandCenterPage() {
       queryDocuments('daily_summaries', [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(7)]),
       queryDocuments('custom_counters', [where('userId', '==', user.uid)]),
       queryDocuments('todos',           [where('userId', '==', user.uid), where('completed', '==', false)]),
-      queryDocuments('daily_tasks',     [where('userId', '==', user.uid)]),
-      queryDocuments('daily_task_logs', [where('userId', '==', user.uid), where('date', '==', date)]),
+      queryDocuments('todos',           [where('userId', '==', user.uid), where('completed', '==', false), where('dueDate', '==', date)]),
     ])
 
     const doneSet = new Set(logDocs.map(l => l.habitId as string))
@@ -211,11 +206,13 @@ export default function CommandCenterPage() {
       work:     pendingTodos.filter((t: DocumentData) => t.category === 'work').length,
     })
 
-    // Daily tasks
-    setDailyTasks(dtDocs.map(d => ({ id: d.id, title: d.title, targetCount: d.targetCount ?? 10, emoji: d.emoji ?? '🎯', color: d.color ?? '#14b8a6' })))
-    const counts: Record<string, number> = {}
-    for (const l of dtLogDocs) counts[l.taskId] = (counts[l.taskId] ?? 0) + (l.count ?? 0)
-    setDailyTaskCounts(counts)
+    // Due today todos (exclude ones already in P1 list)
+    setDueTodayTodos(
+      dueTodayDocs
+        .filter((t: DocumentData) => t.priority !== 1) // P1 already shown above
+        .slice(0, 5)
+        .map((t: DocumentData) => ({ id: t.id, title: t.title, priority: t.priority, category: t.category }))
+    )
 
     setDataLoaded(true)
   }
@@ -252,28 +249,31 @@ export default function CommandCenterPage() {
     }
   }
 
-  async function incrementDailyTask(task: DailyTask, amount: number) {
-    if (!user) return
-    const cur = dailyTaskCounts[task.id] ?? 0
-    const newCount = Math.min(cur + amount, task.targetCount)
-    await addDocument('daily_task_logs', { userId: user.uid, taskId: task.id, date, count: amount })
-    setDailyTaskCounts(prev => ({ ...prev, [task.id]: newCount }))
-  }
-
-  async function addDailyTask() {
-    if (!user || !newDailyTaskTitle.trim()) return
-    const doc = await addDocument('daily_tasks', {
-      userId: user.uid, title: newDailyTaskTitle.trim(),
-      targetCount: parseInt(newDailyTaskTarget) || 10,
-      emoji: newDailyTaskEmoji, color: '#14b8a6',
-    })
-    setDailyTasks(prev => [...prev, { id: doc.id, title: newDailyTaskTitle.trim(), targetCount: parseInt(newDailyTaskTarget) || 10, emoji: newDailyTaskEmoji, color: '#14b8a6' }])
-    setNewDailyTaskTitle(''); setNewDailyTaskTarget('10'); setShowAddDailyTask(false)
-  }
-
-  async function deleteDailyTask(id: string) {
-    await deleteDocument('daily_tasks', id)
-    setDailyTasks(prev => prev.filter(t => t.id !== id))
+  async function loadNextActions() {
+    if (!user || aiNextLoading) return
+    setAiNextLoading(true)
+    try {
+      const pendingHabits = habits.filter(h => !habitsDone.has(h.habitId))
+      const res = await fetch('/api/ai/next-actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          habits: pendingHabits.map(h => ({ name: h.name, priority: h.priority, scheduledTime: h.scheduledTime, completionRate7d: 75, done: false })),
+          todos: p1Todos.map(t => ({ title: t.title, priority: t.priority, category: t.category, dueToday: false })),
+          dueTodos: dueTodayTodos.map(t => ({ title: t.title, priority: t.priority, category: t.category, dueToday: true })),
+          counters: topCounters.map(c => ({ name: c.name, currentCount: c.currentCount, targetCount: c.targetCount })),
+          timeOfDay,
+          focusDone: todayStats.focus,
+          habitsDone: habitsDone.size,
+          habitsTotal: habits.length,
+        }),
+      })
+      const data = await res.json()
+      setAiNextActions(data.actions ?? [])
+    } catch {
+      setAiNextActions([])
+    }
+    setAiNextLoading(false)
   }
 
   async function loadAiBrief() {
@@ -671,85 +671,84 @@ export default function CommandCenterPage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════
-          8. DAILY TASKS — repeating counters
+          8. DUE TODAY — todos with today's due date (non-P1)
+          Psychological: Deadline salience
       ══════════════════════════════════════════════════════════════ */}
-      <section className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm">📋 Daily Tasks</h3>
-          <button onClick={() => setShowAddDailyTask(!showAddDailyTask)}
-            className="text-xs px-2.5 py-1 rounded-lg"
-            style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>+ Add</button>
-        </div>
-
-        {showAddDailyTask && (
-          <div className="mb-3 space-y-2 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
-            <input type="text" value={newDailyTaskTitle} onChange={e => setNewDailyTaskTitle(e.target.value)}
-              placeholder="e.g. Send 20 cold emails"
-              className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-              autoFocus />
-            <div className="flex gap-2">
-              <input type="number" value={newDailyTaskTarget} onChange={e => setNewDailyTaskTarget(e.target.value)}
-                placeholder="Target"
-                className="w-20 px-3 py-2 rounded-xl text-sm outline-none"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-              <div className="flex gap-1 flex-wrap">
-                {['🎯', '📧', '📞', '📚', '💪', '✍️', '🏃', '💻'].map(e => (
-                  <button key={e} onClick={() => setNewDailyTaskEmoji(e)}
-                    className="w-8 h-8 rounded-lg text-lg flex items-center justify-center"
-                    style={{ background: newDailyTaskEmoji === e ? 'rgba(20,184,166,0.15)' : 'var(--surface-2)', border: newDailyTaskEmoji === e ? '2px solid #14b8a6' : '1px solid var(--border)' }}>
-                    {e}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setShowAddDailyTask(false)} className="flex-1 py-2 rounded-xl text-xs" style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>Cancel</button>
-              <button onClick={addDailyTask} disabled={!newDailyTaskTitle.trim()} className="flex-1 py-2 rounded-xl text-xs font-semibold disabled:opacity-50" style={{ background: '#14b8a6', color: 'white' }}>Add</button>
-            </div>
+      {dueTodayTodos.length > 0 && (
+        <section className="card">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm flex items-center gap-1.5">📅 Due Today</h3>
+            <Link href="/todos" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
           </div>
-        )}
+          <div className="space-y-2">
+            {dueTodayTodos.map(t => (
+              <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                style={{ background: 'var(--surface-2)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                <span className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ background: t.priority === 1 ? '#ef4444' : t.priority === 2 ? '#f59e0b' : '#6b7280' }} />
+                <span className="text-sm flex-1 leading-snug">{t.title}</span>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0"
+                  style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>P{t.priority}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
-        {dailyTasks.length === 0 && !showAddDailyTask ? (
-          <p className="text-xs text-muted">Add repeating daily tasks — e.g. &quot;Read 50 pages&quot;, &quot;Send 20 outreach emails&quot;</p>
-        ) : (
-          <div className="space-y-3">
-            {dailyTasks.map(task => {
-              const count = dailyTaskCounts[task.id] ?? 0
-              const pct   = Math.min((count / task.targetCount) * 100, 100)
-              const done  = count >= task.targetCount
+      {/* ═══════════════════════════════════════════════════════════
+          9. AI NEXT 5 ACTIONS — smart recommendations
+          Psychological: Reduces decision fatigue; removes friction
+      ══════════════════════════════════════════════════════════════ */}
+      <section className="card" style={{ border: '1px solid rgba(20,184,166,0.2)' }}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm flex items-center gap-2">⚡ Do This Next</h3>
+          <button onClick={loadNextActions} disabled={aiNextLoading}
+            className="text-xs px-2.5 py-1 rounded-lg disabled:opacity-40"
+            style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>
+            {aiNextLoading ? '⏳' : '↻ Refresh'}
+          </button>
+        </div>
+        {aiNextLoading ? (
+          <div className="flex items-center gap-1.5 py-2">
+            {[0, 0.15, 0.3].map((d, i) => (
+              <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#14b8a6', animationDelay: `${d}s` }} />
+            ))}
+            <span className="text-xs text-muted ml-1">AI is thinking…</span>
+          </div>
+        ) : aiNextActions.length > 0 ? (
+          <div className="space-y-2">
+            {aiNextActions.map((action, i) => {
+              const urgencyColor = action.urgency === 'high' ? '#ef4444' : action.urgency === 'medium' ? '#f59e0b' : '#6b7280'
+              const typeIcon = action.type === 'habit' ? '✅' : action.type === 'todo' ? '📋' : action.type === 'counter' ? '🎯' : '🍅'
+              const typeHref = action.type === 'habit' ? '/habits' : action.type === 'todo' ? '/todos' : action.type === 'counter' ? '/counters' : '/now'
               return (
-                <div key={task.id}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-lg">{task.emoji}</span>
-                    <span className="text-sm flex-1">{task.title}</span>
-                    <span className="text-xs font-bold" style={{ color: done ? '#22c55e' : task.color }}>{count}/{task.targetCount}</span>
-                    <button onClick={() => deleteDailyTask(task.id)} className="text-xs" style={{ color: 'var(--muted)' }}>✕</button>
+                <Link key={i} href={typeHref}
+                  className="flex items-start gap-3 px-3 py-2.5 rounded-xl transition-opacity active:opacity-70"
+                  style={{ background: 'var(--surface-2)', border: `1px solid ${urgencyColor}20` }}>
+                  <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+                    <span className="text-base">{typeIcon}</span>
+                    <span className="text-[9px] font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center"
+                      style={{ background: urgencyColor, color: 'white' }}>{i + 1}</span>
                   </div>
-                  <div className="w-full rounded-full h-1.5 mb-2 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
-                    <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: done ? '#22c55e' : task.color }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium leading-snug">{action.title}</p>
+                    <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--muted)' }}>{action.reason}</p>
                   </div>
-                  {!done && (
-                    <div className="flex gap-2">
-                      {[1, 5, 10].map(n => (
-                        <button key={n} onClick={() => incrementDailyTask(task, n)}
-                          className="flex-1 py-1.5 rounded-lg text-xs font-medium"
-                          style={{ background: 'var(--surface-2)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
-                          +{n}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {done && <p className="text-xs text-center" style={{ color: '#22c55e' }}>✓ Done for today!</p>}
-                </div>
+                  <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5"
+                    style={{ background: `${urgencyColor}15`, color: urgencyColor }}>
+                    {action.urgency}
+                  </span>
+                </Link>
               )
             })}
           </div>
+        ) : (
+          <p className="text-xs text-muted py-1">Tap ↻ to get AI-powered action recommendations based on your habits, todos, and counters.</p>
         )}
       </section>
 
       {/* ═══════════════════════════════════════════════════════════
-          9. MEDICATIONS CHECKLIST
+          10. MEDICATIONS CHECKLIST
       ══════════════════════════════════════════════════════════════ */}
       {medications.length > 0 && (
         <section className="card">
@@ -787,7 +786,7 @@ export default function CommandCenterPage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════
-          10. FOCUS SESSIONS TODAY
+          11. FOCUS SESSIONS TODAY
       ══════════════════════════════════════════════════════════════ */}
       {focusSessions.length > 0 && (
         <section className="card">
@@ -813,7 +812,7 @@ export default function CommandCenterPage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════
-          11. MORNING LOG — weight + burnout mode
+          12. MORNING LOG — weight + burnout mode
       ══════════════════════════════════════════════════════════════ */}
       {!burnoutMode && (
         <section className="card">
@@ -842,7 +841,7 @@ export default function CommandCenterPage() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════
-          12. SAVE — completes the daily loop (+20 XP)
+          13. SAVE — completes the daily loop (+20 XP)
       ══════════════════════════════════════════════════════════════ */}
       <button onClick={handleSave} disabled={saving}
         className="w-full py-4 rounded-2xl font-semibold text-sm disabled:opacity-50"

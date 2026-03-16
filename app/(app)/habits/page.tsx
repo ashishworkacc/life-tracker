@@ -231,6 +231,8 @@ export default function HabitsPage() {
   const [editAiLoading, setEditAiLoading] = useState(false)
 
   const emojiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [aiSortLoading, setAiSortLoading] = useState(false)
+  const [aiSortedIds, setAiSortedIds] = useState<string[] | null>(null)
 
   useEffect(() => {
     if (!user) return
@@ -420,11 +422,51 @@ export default function HabitsPage() {
     setHabits(prev => prev.filter(h => h.id !== id))
   }
 
+  async function sortByAI() {
+    if (!user || aiSortLoading || habits.length === 0) return
+    setAiSortLoading(true)
+    try {
+      const now = new Date()
+      const hour = now.getHours()
+      const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
+      const activeLogs_ = viewDate === today ? todayLogs : viewLogs
+      const doneIds = habits.filter(h => activeLogs_.has(h.id)).map(h => h.id)
+      const pendingHabits = habits.filter(h => !activeLogs_.has(h.id))
+      const res = await fetch('/api/ai/sort-habits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          habits: pendingHabits.map(h => ({
+            id: h.id, name: h.name, scheduledTime: h.scheduledTime,
+            completionRate7d: h.completionRate7d, currentStreak: h.currentStreak, priority: h.priority,
+          })),
+          timeOfDay, doneIds,
+        }),
+      })
+      const data = await res.json()
+      if (data.sortedIds?.length) {
+        // Combine: done habits at end, undone in AI order
+        const doneHabits = habits.filter(h => activeLogs_.has(h.id))
+        setAiSortedIds([...data.sortedIds, ...doneHabits.map((h: Habit) => h.id)])
+      }
+    } catch { /* ignore */ }
+    setAiSortLoading(false)
+  }
+
   const activeLogs = viewDate === today ? todayLogs : viewLogs
   const doneCount = activeLogs.size
   const totalHabits = habits.length
   const consistentCount = habits.filter(h => h.completionRate7d >= 70).length
   const topStreak = Math.max(...habits.map(h => h.currentStreak), 0)
+
+  // AI-sorted or default order
+  const displayHabits = aiSortedIds
+    ? [...habits].sort((a, b) => {
+        const ia = aiSortedIds.indexOf(a.id)
+        const ib = aiSortedIds.indexOf(b.id)
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
+      })
+    : habits
 
   // Date selector options: [2 days ago, yesterday, today]
   const dateOptions = [
@@ -479,6 +521,37 @@ export default function HabitsPage() {
         </div>
       )}
 
+      {/* ─── AI Sort button ─── */}
+      {habits.length > 1 && (
+        <div className="flex items-center gap-2">
+          <button onClick={sortByAI} disabled={aiSortLoading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium disabled:opacity-50 transition-all"
+            style={{
+              background: aiSortedIds ? 'rgba(168,85,247,0.15)' : 'var(--surface-2)',
+              border: aiSortedIds ? '1px solid rgba(168,85,247,0.4)' : '1px solid var(--border)',
+              color: aiSortedIds ? '#a855f7' : 'var(--muted)',
+            }}>
+            {aiSortLoading ? (
+              <>
+                <span className="animate-spin text-sm">⏳</span>
+                AI sorting…
+              </>
+            ) : aiSortedIds ? (
+              <>✨ AI sorted — tap to re-sort</>
+            ) : (
+              <>🤖 AI sort by best order</>
+            )}
+          </button>
+          {aiSortedIds && (
+            <button onClick={() => setAiSortedIds(null)}
+              className="px-2.5 py-2 rounded-xl text-xs"
+              style={{ background: 'var(--surface-2)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
+              ✕ Reset
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ─── Add form ─── */}
       {showAdd ? (
         <HabitForm
@@ -511,7 +584,7 @@ export default function HabitsPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {habits.map(habit => {
+          {displayHabits.map(habit => {
             const done = activeLogs.has(habit.id)
             const atRisk = habit.currentStreak > 0 && !done && viewDate === today
             const pColor = PRIORITY_COLOR[habit.priority]

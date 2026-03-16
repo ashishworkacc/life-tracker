@@ -123,26 +123,35 @@ export default function PomodoroPage() {
 
   async function loadTasks() {
     if (!user) return
-    const [p1Docs, workDocs, habitDocs, counterDocs] = await Promise.all([
+    // Load all incomplete todos then filter client-side to avoid complex composite indexes
+    const [allTodos, habitDocs, counterDocs] = await Promise.all([
       queryDocuments('todos', [
-        where('userId', '==', user.uid), where('completed', '==', false),
-        where('priority', '==', 1), where('category', '==', 'personal'),
-        orderBy('createdAt', 'asc'), limit(10),
+        where('userId', '==', user.uid),
+        where('completed', '==', false),
       ]),
-      queryDocuments('todos', [
-        where('userId', '==', user.uid), where('completed', '==', false),
-        where('category', '==', 'work'), orderBy('createdAt', 'asc'), limit(10),
+      queryDocuments('habits', [
+        where('userId', '==', user.uid),
+        where('isActive', '==', true),
       ]),
-      queryDocuments('habits', [where('userId', '==', user.uid), where('isActive', '==', true)]),
       queryDocuments('custom_counters', [where('userId', '==', user.uid)]),
     ])
-    setP1Todos(p1Docs.map(d => ({ id: d.id, title: d.title, type: 'p1' })))
-    setWorkTodos(workDocs.map(d => ({ id: d.id, title: d.title, type: 'work' })))
-    setHabits(habitDocs.map(d => ({ id: d.id, title: d.name, type: 'habits' })))
+    setP1Todos(
+      allTodos
+        .filter(d => d.priority === 1 && (d.category === 'personal' || !d.category))
+        .slice(0, 10)
+        .map(d => ({ id: d.id, title: d.title, type: 'p1' as const }))
+    )
+    setWorkTodos(
+      allTodos
+        .filter(d => d.category === 'work')
+        .slice(0, 10)
+        .map(d => ({ id: d.id, title: d.title, type: 'work' as const }))
+    )
+    setHabits(habitDocs.map(d => ({ id: d.id, title: d.name, type: 'habits' as const })))
     setCounters(counterDocs.map(d => ({
       id: d.id,
       title: `${d.emoji ?? '🎯'} ${d.name} (${d.currentCount ?? 0}/${d.targetCount ?? 100})`,
-      type: 'counters',
+      type: 'counters' as const,
     })))
   }
 
@@ -151,7 +160,6 @@ export default function PomodoroPage() {
     const docs = await queryDocuments('pomodoro_sessions', [
       where('userId', '==', user.uid),
       where('date', '==', today),
-      orderBy('timestamp', 'desc'),
     ])
     setTotalSessionsToday(docs.length)
     setTotalMinsToday(docs.reduce((s, d) => s + (d.durationMins ?? 25), 0))
