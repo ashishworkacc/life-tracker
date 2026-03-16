@@ -42,6 +42,7 @@ export default function FoodTrackerPage() {
   const [zomato, setZomato] = useState(false)
   const [saving, setSaving] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
 
   useEffect(() => {
     if (!user) return
@@ -74,6 +75,7 @@ export default function FoodTrackerPage() {
     setActiveMeal(meal)
     setDesc(''); setQuantity(''); setUnit('g')
     setProtein(''); setCarbs(''); setFat(''); setCalories(''); setZomato(false)
+    setAiError('')
     setModalOpen(true)
   }
 
@@ -88,25 +90,31 @@ export default function FoodTrackerPage() {
     setFat(String(entry.fat || ''))
     setCalories(String(entry.calories || ''))
     setZomato(entry.zomatoOrdered)
+    setAiError('')
     setModalOpen(true)
   }
 
   async function fillWithAI() {
     if (!desc.trim()) return
     setAiLoading(true)
+    setAiError('')
     try {
       const res = await fetch('/api/ai/macros', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ food: desc.trim(), quantity: quantity || null, unit }),
       })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      if (data.calories) setCalories(String(data.calories))
-      if (data.protein) setProtein(String(data.protein))
-      if (data.carbs) setCarbs(String(data.carbs))
-      if (data.fat) setFat(String(data.fat))
+      if (data.calories != null) setCalories(String(data.calories))
+      if (data.protein != null) setProtein(String(data.protein))
+      if (data.carbs != null) setCarbs(String(data.carbs))
+      if (data.fat != null) setFat(String(data.fat))
+      if (!data.calories && !data.protein && !data.carbs && !data.fat) {
+        setAiError('AI could not estimate — fill manually')
+      }
     } catch {
-      // silently fail
+      setAiError('AI unavailable — fill manually')
     }
     setAiLoading(false)
   }
@@ -270,6 +278,9 @@ export default function FoodTrackerPage() {
               style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: '#a855f7' }}>
               {aiLoading ? '🤔 Estimating...' : '✨ AI Fill Macros'}
             </button>
+            {aiError && (
+              <p className="text-xs text-center" style={{ color: '#ef4444' }}>{aiError}</p>
+            )}
 
             {/* Macros */}
             <div className="grid grid-cols-4 gap-2">

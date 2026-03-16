@@ -75,33 +75,43 @@ export default function JournalPage() {
 
   async function loadReflections() {
     if (!user) return
-    const docs = await queryDocuments('daily_reflections', [
-      where('userId', '==', user.uid),
-      orderBy('date', 'desc'),
-      limit(30),
-    ])
-    setReflections(docs.map(d => ({
-      id: d.id, date: d.date,
-      win: d.win ?? d.winText ?? '',
-      grateful: d.grateful ?? d.proudText ?? '',
-      intention: d.intention ?? d.intentionText ?? '',
-    })))
-    setReflLoading(false)
+    try {
+      const docs = await queryDocuments('daily_reflections', [
+        where('userId', '==', user.uid),
+        orderBy('date', 'desc'),
+        limit(30),
+      ])
+      setReflections(docs.map(d => ({
+        id: d.id, date: d.date,
+        win: d.win ?? d.winText ?? '',
+        grateful: d.grateful ?? d.proudText ?? '',
+        intention: d.intention ?? d.intentionText ?? '',
+      })))
+    } catch (err) {
+      console.error('loadReflections error:', err)
+    } finally {
+      setReflLoading(false)
+    }
   }
 
   async function loadActivityLogs() {
     if (!user) return
-    const docs = await queryDocuments('activity_logs', [
-      where('userId', '==', user.uid),
-    ])
-    const sorted = docs.map(d => ({
-      id: d.id, text: d.text ?? '', mood: d.mood ?? null,
-      activityTag: d.activityTag ?? null,
-      timestamp: typeof d.timestamp === 'string' ? d.timestamp : (d.timestamp?.toDate?.()?.toISOString?.() ?? new Date().toISOString()),
-      date: d.date ?? today, hour: d.hour ?? 0,
-    })).sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-    setActivityLogs(sorted)
-    setLogsLoading(false)
+    try {
+      const docs = await queryDocuments('activity_logs', [
+        where('userId', '==', user.uid),
+      ])
+      const sorted = docs.map(d => ({
+        id: d.id, text: d.text ?? '', mood: d.mood ?? null,
+        activityTag: d.activityTag ?? null,
+        timestamp: typeof d.timestamp === 'string' ? d.timestamp : (d.timestamp?.toDate?.()?.toISOString?.() ?? new Date().toISOString()),
+        date: d.date ?? today, hour: d.hour ?? 0,
+      })).sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      setActivityLogs(sorted)
+    } catch (err) {
+      console.error('loadActivityLogs error:', err)
+    } finally {
+      setLogsLoading(false)
+    }
   }
 
   function openNewReflection() {

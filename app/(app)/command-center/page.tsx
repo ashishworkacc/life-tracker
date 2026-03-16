@@ -14,6 +14,8 @@ interface ActivityLog { id: string; text: string; mood: number | null; activityT
 interface TodoItem { id: string; title: string; priority: number; category: string; completed: boolean }
 interface Medication { id: string; name: string; dosage?: string; frequency: string }
 interface DailyTask { id: string; title: string; targetCount: number; emoji: string; color: string }
+interface HabitDot { date: string; done: number; total: number }
+interface CounterSummary { id: string; name: string; emoji: string; currentCount: number; targetCount: number; color: string }
 
 const MOOD_EMOJIS = ['😔', '😐', '🙂', '😊', '🚀']
 const ACTIVITY_COLORS: Record<string, string> = {
@@ -41,7 +43,6 @@ export default function CommandCenterPage() {
   const dayPct = Math.round((elapsedMins / totalMins) * 100)
   const urgencyColor = remainingMins < 120 ? '#ef4444' : remainingMins < 240 ? '#f59e0b' : '#14b8a6'
   const isMorning = hour >= 5 && hour < 13
-  const isEvening = hour >= 17
 
   // Time of day label
   const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
@@ -49,12 +50,6 @@ export default function CommandCenterPage() {
   // Form state
   const [weight, setWeight] = useState('')
   const [medsChecked, setMedsChecked] = useState(false)
-  const [bedtime, setBedtime] = useState('')
-  const [wakeTime, setWakeTime] = useState('')
-  const [pagesRead, setPagesRead] = useState('')
-  const [mealQuality, setMealQuality] = useState<1 | 2 | 3 | null>(null)
-  const [energy, setEnergy] = useState<number | null>(null)
-  const [screenTime, setScreenTime] = useState('')
   const [oneThing, setOneThing] = useState('')
   const [burnoutMode, setBurnoutMode] = useState(false)
 
@@ -79,6 +74,13 @@ export default function CommandCenterPage() {
   const [newDailyTaskTarget, setNewDailyTaskTarget] = useState('10')
   const [newDailyTaskEmoji, setNewDailyTaskEmoji] = useState('🎯')
 
+  // Stats from history
+  const [habitDots, setHabitDots] = useState<HabitDot[]>([])
+  const [topCounters, setTopCounters] = useState<CounterSummary[]>([])
+  const [todoStats, setTodoStats] = useState({ personal: 0, work: 0 })
+  const [weeklyHabitPct, setWeeklyHabitPct] = useState<number | null>(null)
+  const [dataLoaded, setDataLoaded] = useState(false)
+
   // AI brief
   const [aiBrief, setAiBrief] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
@@ -87,12 +89,19 @@ export default function CommandCenterPage() {
   // UI
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [eveningOpen, setEveningOpen] = useState(isEvening)
 
   useEffect(() => {
     if (!user) return
     loadData()
   }, [user])
+
+  // Auto-load AI brief once all data is available
+  useEffect(() => {
+    if (dataLoaded && !aiLoaded && !aiLoading) {
+      loadAiBrief()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataLoaded])
 
   async function loadData() {
     if (!user) return
@@ -152,6 +161,45 @@ export default function CommandCenterPage() {
     const counts: Record<string, number> = {}
     for (const l of dtLogDocs) counts[l.taskId] = (counts[l.taskId] ?? 0) + (l.count ?? 0)
     setDailyTaskCounts(counts)
+
+    // 7-day summaries for habit dots + weekly avg
+    const [summaries7d, counterDocs, pendingTodos] = await Promise.all([
+      queryDocuments('daily_summaries', [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(7)]),
+      queryDocuments('custom_counters', [where('userId', '==', user.uid)]),
+      queryDocuments('todos', [where('userId', '==', user.uid), where('completed', '==', false)]),
+    ])
+
+    const dots = summaries7d.slice(0, 7).reverse().map((s: DocumentData) => ({
+      date: s.date as string,
+      done: s.habitsDone ?? 0,
+      total: s.habitsTotal ?? 0,
+    }))
+    setHabitDots(dots)
+
+    const validDays = dots.filter(d => d.total > 0)
+    if (validDays.length > 0) {
+      const avg = validDays.reduce((s, d) => s + d.done / d.total, 0) / validDays.length
+      setWeeklyHabitPct(Math.round(avg * 100))
+    }
+
+    setTopCounters(
+      counterDocs
+        .sort((a: DocumentData, b: DocumentData) =>
+          (b.currentCount / Math.max(b.targetCount, 1)) - (a.currentCount / Math.max(a.targetCount, 1)))
+        .slice(0, 3)
+        .map((c: DocumentData) => ({
+          id: c.id, name: c.name, emoji: c.emoji ?? '🎯',
+          currentCount: c.currentCount ?? 0, targetCount: c.targetCount ?? 100,
+          color: c.color ?? '#14b8a6',
+        }))
+    )
+
+    setTodoStats({
+      personal: pendingTodos.filter((t: DocumentData) => t.category === 'personal').length,
+      work: pendingTodos.filter((t: DocumentData) => t.category === 'work').length,
+    })
+
+    setDataLoaded(true)
   }
 
   async function toggleHabit(habit: HabitLog) {
@@ -223,9 +271,15 @@ export default function CommandCenterPage() {
           timeOfDay,
           habits: { done: habitsDone.size, total: habits.length },
           todos: { p1Pending: p1Todos.length, completedToday: completedTodayDocs.length },
-          energy,
           sleep: todayStats.sleep,
           focusSessions: todayStats.focus,
+          weeklyHabitPct,
+          xpLevel,
+          xpToday,
+          todoStats,
+          topCounters: topCounters.map(c => ({
+            name: c.name, currentCount: c.currentCount, targetCount: c.targetCount
+          })),
         }),
       })
       const data = await res.json()
@@ -243,27 +297,12 @@ export default function CommandCenterPage() {
     setSaving(true)
     const promises: Promise<unknown>[] = []
     if (weight) promises.push(addDocument('weight_logs', { userId: user.uid, date, weight: parseFloat(weight) }))
-    if (bedtime || wakeTime) {
-      let hoursSlept: number | null = null
-      if (bedtime && wakeTime) {
-        const [bh, bm] = bedtime.split(':').map(Number)
-        const [wh, wm] = wakeTime.split(':').map(Number)
-        let diff = (wh * 60 + wm) - (bh * 60 + bm)
-        if (diff < 0) diff += 24 * 60
-        hoursSlept = Math.round(diff / 60 * 10) / 10
-      }
-      promises.push(addDocument('sleep_logs', { userId: user.uid, date, bedtime, wakeTime, hoursSlept }))
-    }
-    if (screenTime) promises.push(addDocument('screen_time_logs', { userId: user.uid, date, minutesUsed: parseInt(screenTime), loggedAfter10pm: hour >= 22 }))
-    if (energy) promises.push(addDocument('daily_energy_logs', { userId: user.uid, date, energyLevel: energy }))
     promises.push(addDocument('daily_summaries', {
       userId: user.uid, date,
       weight: weight ? parseFloat(weight) : null,
-      pagesRead: pagesRead ? parseInt(pagesRead) : null,
       habitsDone: habitsDone.size, habitsTotal: habits.length,
-      phoneMinutes: screenTime ? parseInt(screenTime) : null,
-      energyLevel: energy, identityVotes: habitsDone.size,
-      oneThing: oneThing || null, burnoutModeUsed: burnoutMode, mealQuality,
+      identityVotes: habitsDone.size,
+      oneThing: oneThing || null, burnoutModeUsed: burnoutMode,
     }))
     promises.push(addDocument('xp_events', { userId: user.uid, date, eventType: 'command_center', xpEarned: 20, description: 'Saved Daily Command Center' }))
     await Promise.all(promises)
@@ -273,8 +312,6 @@ export default function CommandCenterPage() {
     setTimeout(() => setSaved(false), 2000)
   }
 
-  const energyEmojis = ['😴', '😔', '😐', '😊', '🚀']
-  const mealLabels = ['😕 Poor', '😐 OK', '😊 Good']
   const displayHabits = burnoutMode ? habits.filter(h => h.priority === 1).slice(0, 3) : habits
   const timelineHours = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i)
 
@@ -346,22 +383,79 @@ export default function CommandCenterPage() {
         </div>
       </div>
 
-      {/* ─── AI DAILY BRIEF ─── */}
+      {/* ─── 7-DAY HABIT STREAK ─── */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm flex items-center gap-2">📈 This Week</h3>
+          {weeklyHabitPct != null && (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{ background: weeklyHabitPct >= 70 ? 'rgba(34,197,94,0.15)' : weeklyHabitPct >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)', color: weeklyHabitPct >= 70 ? '#22c55e' : weeklyHabitPct >= 40 ? '#f59e0b' : '#ef4444' }}>
+              {weeklyHabitPct}% avg
+            </span>
+          )}
+        </div>
+        <div className="flex justify-between gap-1">
+          {Array.from({ length: 7 }).map((_, i) => {
+            const d = new Date()
+            d.setDate(d.getDate() - (6 - i))
+            const dStr = d.toISOString().split('T')[0]
+            const dot = habitDots.find(h => h.date === dStr)
+            const pct = dot?.total ? dot.done / dot.total : 0
+            const dayLabel = d.toLocaleDateString('en-IN', { weekday: 'short' }).slice(0, 2)
+            const isToday = dStr === date
+            let bg = 'var(--surface-2)'
+            if (pct >= 0.9) bg = '#22c55e'
+            else if (pct >= 0.6) bg = '#86efac'
+            else if (pct >= 0.3) bg = '#fcd34d'
+            else if (dot) bg = '#fca5a5'
+            return (
+              <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                {dot && dot.total > 0 ? (
+                  <span className="text-[9px] font-bold" style={{ color: pct >= 0.6 ? '#22c55e' : '#f59e0b' }}>
+                    {dot.done}/{dot.total}
+                  </span>
+                ) : <span className="text-[9px]">&nbsp;</span>}
+                <div className="w-full rounded-lg"
+                  style={{ height: 28, background: bg, border: isToday ? '2px solid #14b8a6' : '1px solid var(--border)', opacity: dot ? 1 : 0.35 }} />
+                <span className="text-[10px]" style={{ color: isToday ? '#14b8a6' : 'var(--muted)', fontWeight: isToday ? 600 : 400 }}>
+                  {dayLabel}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-3 mt-2 justify-end">
+          {[['#22c55e', '90%+'], ['#86efac', '60%+'], ['#fcd34d', '30%+'], ['#fca5a5', '<30%']].map(([color, label]) => (
+            <div key={label} className="flex items-center gap-1">
+              <div className="w-2 h-2 rounded-sm" style={{ background: color }} />
+              <span className="text-[9px] text-muted">{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ─── AI MOTIVATIONAL BRIEF ─── */}
       <div className="card" style={{ border: '1px solid rgba(168,85,247,0.25)' }}>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="font-semibold text-sm flex items-center gap-2">🤖 Your Day at a Glance</h3>
+          <h3 className="font-semibold text-sm flex items-center gap-2">🤖 AI Coach</h3>
           <button onClick={loadAiBrief} disabled={aiLoading}
             className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-50"
             style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
-            {aiLoading ? 'Thinking...' : aiLoaded ? '↻ Refresh' : 'Ask AI'}
+            {aiLoading ? '⏳' : '↻ Refresh'}
           </button>
         </div>
-        {aiLoaded ? (
+        {aiLoading && !aiLoaded ? (
+          <div className="flex items-center gap-2 py-2">
+            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7' }} />
+            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7', animationDelay: '0.2s' }} />
+            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7', animationDelay: '0.4s' }} />
+            <span className="text-xs text-muted ml-1">Analysing your data...</span>
+          </div>
+        ) : aiLoaded ? (
           <p className="text-sm leading-relaxed" style={{ color: 'var(--foreground)' }}>{aiBrief}</p>
         ) : (
           <p className="text-xs text-muted">
-            {habitsDone.size}/{habits.length} habits · {p1Todos.length} P1 todos pending · {todayStats.focus} focus session{todayStats.focus !== 1 ? 's' : ''}
-            {' — '}tap &quot;Ask AI&quot; for a personalized briefing
+            {habitsDone.size}/{habits.length} habits · {p1Todos.length} P1 pending · {todayStats.focus} focus session{todayStats.focus !== 1 ? 's' : ''}
           </p>
         )}
       </div>
@@ -391,6 +485,59 @@ export default function CommandCenterPage() {
                 <Link href="/now" className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>▶</Link>
               </div>
             ))}
+          </div>
+        </section>
+      )}
+
+      {/* ─── TODO STATS ─── */}
+      {(todoStats.personal > 0 || todoStats.work > 0) && (
+        <div className="grid grid-cols-2 gap-2">
+          <Link href="/todos?tab=personal" className="card-sm flex items-center gap-3 transition-opacity active:opacity-70">
+            <span className="text-xl">👤</span>
+            <div>
+              <p className="text-xs text-muted">Personal</p>
+              <p className="text-xl font-bold" style={{ color: todoStats.personal > 5 ? '#f59e0b' : 'var(--foreground)' }}>{todoStats.personal}</p>
+              <p className="text-[10px] text-muted">open todos</p>
+            </div>
+          </Link>
+          <Link href="/todos?tab=work" className="card-sm flex items-center gap-3 transition-opacity active:opacity-70">
+            <span className="text-xl">💼</span>
+            <div>
+              <p className="text-xs text-muted">Work</p>
+              <p className="text-xl font-bold" style={{ color: todoStats.work > 5 ? '#f59e0b' : 'var(--foreground)' }}>{todoStats.work}</p>
+              <p className="text-[10px] text-muted">open todos</p>
+            </div>
+          </Link>
+        </div>
+      )}
+
+      {/* ─── TOP COUNTERS ─── */}
+      {topCounters.length > 0 && (
+        <section className="card">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm flex items-center gap-2">🎯 Counter Goals</h3>
+            <Link href="/counters" className="text-xs" style={{ color: '#14b8a6' }}>See all →</Link>
+          </div>
+          <div className="space-y-3">
+            {topCounters.map(c => {
+              const pct = Math.min((c.currentCount / c.targetCount) * 100, 100)
+              const done = c.currentCount >= c.targetCount
+              return (
+                <div key={c.id}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm">{c.emoji} {c.name}</span>
+                    <span className="text-xs font-bold" style={{ color: done ? '#22c55e' : c.color }}>
+                      {c.currentCount} / {c.targetCount}
+                    </span>
+                  </div>
+                  <div className="relative w-full rounded-full h-2 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                    <div className="h-full rounded-full transition-all"
+                      style={{ width: `${pct}%`, background: done ? '#22c55e' : c.color }} />
+                  </div>
+                  <p className="text-[10px] text-muted mt-0.5 text-right">{Math.round(pct)}% complete</p>
+                </div>
+              )
+            })}
           </div>
         </section>
       )}
@@ -608,77 +755,6 @@ export default function CommandCenterPage() {
               💊 All meds taken {medsChecked ? '✓' : ''}
             </button>
           </div>
-        </section>
-      )}
-
-      {/* ─── EVENING LOG ─── */}
-      {!burnoutMode && (
-        <section className="card">
-          <button className="w-full flex items-center justify-between" onClick={() => setEveningOpen(!eveningOpen)}>
-            <h3 className="font-semibold text-sm flex items-center gap-2">
-              <span>🌙</span> Evening Log
-              {isEvening && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'rgba(20,184,166,0.12)', color: '#14b8a6' }}>now</span>}
-            </h3>
-            <span className="text-sm text-muted">{eveningOpen ? '▲' : '▼'}</span>
-          </button>
-          {eveningOpen && (
-            <div className="space-y-3 mt-3">
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="text-xs text-muted mb-1 block">Bedtime</label>
-                  <input type="time" value={bedtime} onChange={e => setBedtime(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-                </div>
-                <div className="flex-1">
-                  <label className="text-xs text-muted mb-1 block">Wake time</label>
-                  <input type="time" value={wakeTime} onChange={e => setWakeTime(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1 flex items-center gap-2">
-                  <span className="text-xl">📚</span>
-                  <input type="number" value={pagesRead} onChange={e => setPagesRead(e.target.value)}
-                    placeholder="Pages read"
-                    className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-                </div>
-                <div className="flex-1 flex items-center gap-2">
-                  <span className="text-xl">📱</span>
-                  <input type="number" value={screenTime} onChange={e => setScreenTime(e.target.value)}
-                    placeholder="Screen mins"
-                    className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-muted mb-2 block">Meal quality</label>
-                <div className="flex gap-2">
-                  {mealLabels.map((label, i) => (
-                    <button key={i} onClick={() => setMealQuality((i + 1) as 1 | 2 | 3)}
-                      className="flex-1 py-2 rounded-xl text-xs font-medium"
-                      style={{ background: mealQuality === i + 1 ? 'rgba(20,184,166,0.15)' : 'var(--surface-2)', border: mealQuality === i + 1 ? '1px solid #14b8a6' : '1px solid var(--border)', color: mealQuality === i + 1 ? '#14b8a6' : 'var(--foreground)' }}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-muted mb-2 block">Energy today</label>
-                <div className="flex gap-2">
-                  {energyEmojis.map((emoji, i) => (
-                    <button key={i} onClick={() => setEnergy(i + 1)}
-                      className="flex-1 py-2 rounded-xl text-xl"
-                      style={{ background: energy === i + 1 ? 'rgba(20,184,166,0.15)' : 'var(--surface-2)', border: energy === i + 1 ? '2px solid #14b8a6' : '1px solid var(--border)' }}>
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </section>
       )}
 

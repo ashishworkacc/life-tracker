@@ -71,48 +71,53 @@ export default function VitalsPage() {
 
   async function loadData() {
     if (!user) return
-    // Load medications list
-    const medDocs = await queryDocuments('medications', [
-      where('userId', '==', user.uid),
-      where('isActive', '==', true),
-    ])
-    setMedications(medDocs.map(d => ({
-      id: d.id, name: d.name, dosage: d.dosage ?? '',
-      frequency: d.frequency ?? 'morning', isActive: d.isActive ?? true,
-    })))
+    try {
+      // Load medications list
+      const medDocs = await queryDocuments('medications', [
+        where('userId', '==', user.uid),
+        where('isActive', '==', true),
+      ])
+      setMedications(medDocs.map(d => ({
+        id: d.id, name: d.name, dosage: d.dosage ?? '',
+        frequency: d.frequency ?? 'morning', isActive: d.isActive ?? true,
+      })))
 
-    // Load today's vitals log
-    const todayLogs = await queryDocuments('vitals_logs', [
-      where('userId', '==', user.uid),
-      where('date', '==', today),
-    ])
-    if (todayLogs.length > 0) {
-      const l = todayLogs[0]
-      setTodayLogId(l.id)
-      setBp(l.bloodPressure ?? '')
-      setSugar(l.bloodSugar ?? '')
-      setHr(l.heartRate ?? '')
-      setNotes(l.notes ?? '')
-      setMedsTakenToday(new Set(l.medsTaken ?? []))
-    } else {
-      setTodayLogId(null)
+      // Load today's vitals log
+      const todayLogs = await queryDocuments('vitals_logs', [
+        where('userId', '==', user.uid),
+        where('date', '==', today),
+      ])
+      if (todayLogs.length > 0) {
+        const l = todayLogs[0]
+        setTodayLogId(l.id)
+        setBp(l.bloodPressure ?? '')
+        setSugar(l.bloodSugar ?? '')
+        setHr(l.heartRate ?? '')
+        setNotes(l.notes ?? '')
+        setMedsTakenToday(new Set(l.medsTaken ?? []))
+      } else {
+        setTodayLogId(null)
+      }
+
+      // Load recent vitals logs
+      const allLogs = await queryDocuments('vitals_logs', [
+        where('userId', '==', user.uid),
+        orderBy('date', 'desc'),
+      ])
+      setRecentLogs(allLogs.slice(0, 7).map(d => ({
+        id: d.id,
+        date: d.date,
+        bloodPressure: d.bloodPressure,
+        bloodSugar: d.bloodSugar,
+        heartRate: d.heartRate,
+        notes: d.notes,
+        medsTaken: d.medsTaken ?? [],
+      })))
+    } catch (err) {
+      console.error('Vitals loadData error:', err)
+    } finally {
+      setLoading(false)
     }
-
-    // Load recent vitals logs
-    const allLogs = await queryDocuments('vitals_logs', [
-      where('userId', '==', user.uid),
-      orderBy('date', 'desc'),
-    ])
-    setRecentLogs(allLogs.slice(0, 7).map(d => ({
-      id: d.id,
-      date: d.date,
-      bloodPressure: d.bloodPressure,
-      bloodSugar: d.bloodSugar,
-      heartRate: d.heartRate,
-      notes: d.notes,
-      medsTaken: d.medsTaken ?? [],
-    })))
-    setLoading(false)
   }
 
   async function toggleMed(medId: string) {

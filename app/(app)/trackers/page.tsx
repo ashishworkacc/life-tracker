@@ -8,7 +8,8 @@ const trackers = [
   { href: '/trackers/food', icon: '🍽️', label: 'Food Log', desc: 'Meals, macros & calories', color: '#22c55e' },
   { href: '/trackers/screen-time', icon: '📱', label: 'Screen Time', desc: 'Daily phone usage', color: '#ef4444' },
   { href: '/trackers/books', icon: '📚', label: 'Books', desc: 'Reading tracker & progress', color: '#14b8a6' },
-  { href: '/trackers/vitals', icon: '💊', label: 'Vitals & Meds', desc: 'Custom daily vitals', color: '#a855f7' },
+  { href: '/trackers/vitals', icon: '💊', label: 'Vitals & Meds', desc: 'Blood pressure, meds', color: '#a855f7' },
+  { href: '/trackers/custom', icon: '📊', label: 'Custom Trackers', desc: 'Track anything you want', color: '#f97316' },
 ]
 
 export default function TrackersPage() {

@@ -3,30 +3,48 @@ import { aiComplete } from '@/lib/ai/client'
 
 export async function POST(req: NextRequest) {
   try {
-    const { habits, todos, energy, sleep, focusSessions, timeOfDay, date } = await req.json()
+    const {
+      habits, todos, energy, sleep, focusSessions, timeOfDay, date,
+      weeklyHabitPct, xpLevel, xpToday, todoStats, topCounters,
+    } = await req.json()
 
-    const prompt = `Today is ${date}. It is currently ${timeOfDay}.
+    const counterLines = topCounters?.length
+      ? topCounters.map((c: { name: string; currentCount: number; targetCount: number }) =>
+          `  • ${c.name}: ${c.currentCount}/${c.targetCount} (${Math.round((c.currentCount / Math.max(c.targetCount, 1)) * 100)}%)`
+        ).join('\n')
+      : '  • No counters set up'
 
-User data:
+    const prompt = `Today is ${date}. It is ${timeOfDay}.
+
+TODAY:
 - Habits done: ${habits?.done ?? 0}/${habits?.total ?? 0}
 - P1 Todos pending: ${todos?.p1Pending ?? 0}, completed today: ${todos?.completedToday ?? 0}
-- Energy level: ${energy ?? 'not logged'}/5
+- Personal todos open: ${todoStats?.personal ?? 0}, Work todos open: ${todoStats?.work ?? 0}
 - Sleep last night: ${sleep ?? 'not logged'} hours
-- Focus sessions today: ${focusSessions ?? 0} Pomodoros
+- Focus (Pomodoro) sessions: ${focusSessions ?? 0}
+- Energy level: ${energy ?? 'not logged'}/5
+- XP earned today: ${xpToday ?? 0}, Current level: ${xpLevel ?? 1}
 
-Write a 2-3 sentence personal secretary message. Be warm, direct, and motivating.
-Include: (1) a quick honest assessment of how the day is going, (2) one specific thing they should do next.
-If it's morning, focus on the plan. If afternoon, assess momentum. If evening, focus on closing strong.
-No generic advice. Be specific based on their actual numbers.`
+THIS WEEK:
+- Average habit completion: ${weeklyHabitPct != null ? weeklyHabitPct + '%' : 'not enough data'}
+
+COUNTERS PROGRESS:
+${counterLines}
+
+Write a 3–4 sentence motivational brief with these parts:
+1. One honest sentence about how today and this week are going based on actual numbers.
+2. One insight about what the data pattern suggests (trend, habit consistency, counter pace, etc.).
+3. One specific, actionable recommendation for what to do next or focus on.
+Be warm, direct, and specific — never generic. Use actual numbers from the data.`
 
     const result = await aiComplete(
-      'You are a personal productivity secretary. Write concise, personalized, action-oriented messages. Never be generic.',
+      'You are a personal productivity coach. Write concise, data-driven, motivational messages. Be specific, warm, and honest. Never use filler phrases.',
       prompt
     )
 
     return NextResponse.json({ brief: result.trim() })
   } catch (err) {
     console.error('Daily brief API error:', err)
-    return NextResponse.json({ brief: "You're making progress — keep going. Focus on your top priority next." })
+    return NextResponse.json({ brief: "You're building momentum — keep going. Focus on your top priority next." })
   }
 }

@@ -5,31 +5,32 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useDarkMode } from '@/lib/hooks/useDarkMode'
 
 const PAGE_TITLES: Record<string, string> = {
-  '/command-center':  '⚡ Today',
-  '/dashboard':       '📊 Dashboard',
-  '/goals':           '🎯 Goals',
-  '/habits':          '✅ Habits',
-  '/trackers':        '📈 Trackers',
-  '/trackers/sleep':  '😴 Sleep',
-  '/trackers/weight': '⚖️ Weight',
-  '/trackers/food':   '🥗 Food Log',
+  '/command-center':       '⚡ Today',
+  '/dashboard':            '📊 Dashboard',
+  '/goals':                '🎯 Goals',
+  '/habits':               '✅ Habits',
+  '/trackers':             '📈 Trackers',
+  '/trackers/sleep':       '😴 Sleep',
+  '/trackers/weight':      '⚖️ Weight',
+  '/trackers/food':        '🥗 Food Log',
   '/trackers/screen-time': '📱 Screen Time',
-  '/trackers/books':  '📚 Books',
-  '/trackers/vitals': '💊 Medications',
-  '/counters':        '🔢 Counters',
-  '/todos':           '📋 Todos',
-  '/time-tracker':    '⏱️ Time',
-  '/ai-insights':     '🤖 AI Insights',
-  '/chat':            '💬 AI Chat',
-  '/journal':         '📓 Journal',
-  '/focus':           '🍅 Focus',
-  '/inbox':           '📥 Inbox',
-  '/now':             '🎯 Now',
-  '/gamification':    '🏆 Achievements',
-  '/settings':        '⚙️ Settings',
+  '/trackers/books':       '📚 Books',
+  '/trackers/vitals':      '💊 Medications',
+  '/trackers/custom':      '📊 Custom Trackers',
+  '/counters':             '🔢 Counters',
+  '/todos':                '📋 Todos',
+  '/time-tracker':         '⏱️ Time',
+  '/ai-insights':          '🤖 AI Insights',
+  '/chat':                 '💬 AI Chat',
+  '/journal':              '📓 Journal',
+  '/focus':                '🍅 Focus',
+  '/inbox':                '📥 Inbox',
+  '/now':                  '🎯 Now',
+  '/gamification':         '🏆 Achievements',
+  '/settings':             '⚙️ Settings',
 }
 
-const MAIN_ROUTES = ['/command-center', '/todos', '/habits', '/counters']
+const MAIN_ROUTES = ['/command-center']
 
 interface TopBarProps {
   inboxCount?: number
@@ -62,11 +63,11 @@ export default function TopBar({ inboxCount = 0, xpToday = 0, level = 1 }: TopBa
         {/* Left: back button or spacer */}
         <div style={{ minWidth: 56 }}>
           {showBack && (
-            <button onClick={() => router.back()}
+            <button onClick={() => router.push('/command-center')}
               className="flex items-center gap-1 text-sm font-medium py-1 rounded-lg"
               style={{ color: '#14b8a6' }}
-              aria-label="Go back">
-              ← Back
+              aria-label="Go to Today">
+              ← Today
             </button>
           )}
         </div>
