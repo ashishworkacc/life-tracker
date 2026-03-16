@@ -141,3 +141,68 @@ body {
 .bottom-nav-height {
   height: calc(4rem + env(safe-area-inset-bottom));
 }
+
+/* ─── Responsive layout ──────────────────────────────────────────────────────── */
+
+/* On desktop: main content starts after the 220px sidebar */
+@media (min-width: 1024px) {
+  .lg\:app-main-desktop {
+    margin-left: 220px;
+  }
+
+  /* Override the mobile bottom-nav safe-area padding on desktop */
+  .pb-safe {
+    padding-bottom: 3rem;
+  }
+}
+
+/* ─── Floating Action Buttons ────────────────────────────────────────────────── */
+
+/* Mobile: sit above the bottom nav (4.5rem + safe area) */
+.fab-bottom {
+  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+}
+
+/* Panic button: mobile left, desktop right (both above sidebar) */
+.fab-panic-position {
+  left: 1rem;
+}
+
+@media (min-width: 1024px) {
+  /* Desktop: just sit 2rem from the bottom, no bottom nav to clear */
+  .fab-bottom {
+    bottom: 2rem;
+  }
+  /* Move panic button to right side on desktop so it doesn't float over sidebar */
+  .fab-panic-position {
+    left: auto;
+    right: 5rem; /* 3rem gap from the quick-add button */
+  }
+}
+
+/* ─── Responsive grid helpers ────────────────────────────────────────────────── */
+
+/* Two-column content layout used on Today and other wide pages */
+.desktop-two-col {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 1024px) {
+  .desktop-two-col {
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 1.5rem;
+    align-items: start;
+  }
+}
+
+/* Wider card padding on desktop */
+@media (min-width: 1024px) {
+  .card {
+    padding: 1.25rem;
+  }
+  .card-sm {
+    padding: 1rem;
+  }
+}

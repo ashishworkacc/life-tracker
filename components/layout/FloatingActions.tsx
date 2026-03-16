@@ -11,28 +11,22 @@ export default function FloatingActions() {
   return (
     <>
       {/* Floating Quick-Add button */}
+      {/* Mobile: above the bottom nav bar. Desktop: bottom-right corner */}
       <button
         onClick={() => setQuickAddOpen(true)}
-        className="fixed right-4 z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-transform hover:scale-110 active:scale-95"
-        style={{
-          bottom: 'calc(4.5rem + env(safe-area-inset-bottom))',
-          background: '#14b8a6',
-          color: 'white',
-        }}
+        className="fixed right-4 z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-transform hover:scale-110 active:scale-95 fab-bottom"
+        style={{ background: '#14b8a6', color: 'white' }}
         aria-label="Quick add"
       >
         +
       </button>
 
       {/* Overwhelm Panic Button */}
+      {/* Mobile: left-4 above bottom nav. Desktop: right side to avoid sidebar */}
       <button
         onClick={() => setPanicOpen(true)}
-        className="fixed left-4 z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-transform hover:scale-110 active:scale-95"
-        style={{
-          bottom: 'calc(4.5rem + env(safe-area-inset-bottom))',
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
-        }}
+        className="fixed z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-transform hover:scale-110 active:scale-95 fab-bottom fab-panic-position"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         aria-label="Overwhelm panic button"
         title="Feeling overwhelmed?"
       >

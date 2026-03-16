@@ -348,486 +348,454 @@ export default function CommandCenterPage() {
   const greetingEmoji = hour < 12 ? '🌅' : hour < 17 ? '☀️' : '🌙'
 
   return (
-    <div className="pb-6 space-y-4 animate-fade-in">
+    <div className="pb-6 animate-fade-in space-y-4">
 
-      {/* ═══════════════════════════════════════════════════════════
-          1. HERO HEADER — Greeting + Day ring + XP bar
-          Psychological: Identity-based framing + progress visibility
-      ══════════════════════════════════════════════════════════════ */}
-      <div className="card space-y-3" style={{ border: `1px solid ${urgencyColor}30` }}>
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs text-muted">
-              {now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
-            </p>
-            <p className="text-lg font-bold mt-0.5">{greetingEmoji} {greeting}!</p>
-            <p className="text-xs mt-0.5" style={{ color: urgencyColor }}>{formatRemaining()}</p>
-          </div>
-          {/* Day progress ring */}
-          <div className="relative flex-shrink-0" style={{ width: 64, height: 64 }}>
-            <svg width="64" height="64" viewBox="0 0 64 64" className="-rotate-90">
-              <circle cx="32" cy="32" r="26" fill="none" strokeWidth="5" stroke="var(--surface-2)" />
-              <circle cx="32" cy="32" r="26" fill="none" strokeWidth="5"
-                stroke={urgencyColor}
-                strokeDasharray={`${2 * Math.PI * 26}`}
-                strokeDashoffset={`${2 * Math.PI * 26 * (1 - dayPct / 100)}`}
-                strokeLinecap="round"
-                style={{ transition: 'stroke-dashoffset 1s linear' }} />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-sm font-bold leading-none" style={{ color: urgencyColor }}>{dayPct}%</span>
-              <span className="text-[8px] text-muted">day</span>
-            </div>
-          </div>
-        </div>
+      {/* ════════════════════════════════════════════════════
+          Responsive 2-column layout on desktop
+          Left: primary interactions | Right: context & AI
+      ════════════════════════════════════════════════════ */}
+      <div className="desktop-two-col">
 
-        {/* XP progress bar toward next level */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                style={{ background: 'rgba(168,85,247,0.15)', color: '#a855f7' }}>
-                Lv {xpLevel}
-              </span>
-              {xpToday > 0 && (
-                <span className="text-xs" style={{ color: '#a855f7' }}>+{xpToday} today</span>
-              )}
-            </div>
-            <span className="text-[10px] text-muted">{xpEarned}/{xpNeeded} XP</span>
-          </div>
-          <div className="w-full rounded-full h-2 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
-            <div className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${xpBarPct}%`, background: 'linear-gradient(90deg, #a855f7, #818cf8)' }} />
-          </div>
-        </div>
+        {/* ── LEFT COLUMN ─────────────────────────────────── */}
+        <div className="space-y-4">
 
-        {/* Sleep + Focus strip */}
-        <div className="flex gap-2">
-          <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl"
-            style={{ background: 'var(--surface-2)' }}>
-            <span className="text-base">😴</span>
-            <div>
-              <p className="text-[10px] text-muted">Sleep</p>
-              <p className="text-sm font-bold" style={{ color: todayStats.sleep && todayStats.sleep < 6 ? '#ef4444' : '#818cf8' }}>
-                {todayStats.sleep ? `${todayStats.sleep}h` : '—'}
-              </p>
-            </div>
-          </div>
-          <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl"
-            style={{ background: 'var(--surface-2)' }}>
-            <span className="text-base">🍅</span>
-            <div>
-              <p className="text-[10px] text-muted">Focus</p>
-              <p className="text-sm font-bold" style={{ color: '#14b8a6' }}>
-                {todayStats.focus} {focusTotalMins > 0 && <span className="text-[10px] text-muted font-normal">({focusTotalMins}m)</span>}
-              </p>
-            </div>
-          </div>
-          <Link href="/now" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs"
-            style={{ background: 'rgba(20,184,166,0.15)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.3)' }}>
-            ▶ Focus
-          </Link>
-        </div>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════
-          2. AI COACH — loads automatically, contextual
-          Psychological: Implementation intention / next-action framing
-      ══════════════════════════════════════════════════════════════ */}
-      <div className="card" style={{ border: '1px solid rgba(168,85,247,0.2)' }}>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-semibold text-sm flex items-center gap-2">🤖 AI Coach</h3>
-          <button onClick={() => { setAiLoaded(false); loadAiBrief() }} disabled={aiLoading}
-            className="text-[10px] px-2.5 py-1 rounded-lg disabled:opacity-40"
-            style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
-            {aiLoading ? '⏳' : '↻'}
-          </button>
-        </div>
-        {aiLoading ? (
-          <div className="flex items-center gap-1.5 py-1">
-            {[0, 0.15, 0.3].map((d, i) => (
-              <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7', animationDelay: `${d}s` }} />
-            ))}
-            <span className="text-xs text-muted ml-1">Analysing your data…</span>
-          </div>
-        ) : aiLoaded ? (
-          <p className="text-sm leading-relaxed">{aiBrief}</p>
-        ) : (
-          <p className="text-xs text-muted">Loading insights…</p>
-        )}
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════
-          3. ONE THING — Focused intention for today
-          Psychological: Implementation intention
-      ══════════════════════════════════════════════════════════════ */}
-      <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-        style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.25)' }}>
-        <span className="text-xl flex-shrink-0">⭐</span>
-        <input type="text" value={oneThing} onChange={e => setOneThing(e.target.value)}
-          placeholder="My one non-negotiable task today…"
-          className="flex-1 text-sm font-medium outline-none"
-          style={{ background: 'transparent', color: '#818cf8' }} />
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════
-          4. P1 TODOS — Highest psychological urgency
-          Psychological: Cognitive load reduction — only top 5 shown
-      ══════════════════════════════════════════════════════════════ */}
-      {p1Todos.length > 0 && (
-        <section className="card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm flex items-center gap-1.5">🔴 Must Do Today</h3>
-            <Link href="/todos" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
-          </div>
-          <div className="space-y-2">
-            {p1Todos.map(t => (
-              <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
-                style={{ background: 'var(--surface-2)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#ef4444' }} />
-                <span className="text-sm flex-1 leading-snug">{t.title}</span>
-                <Link href="/now"
-                  className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
-                  style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>▶</Link>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Todo inbox counts */}
-      {(todoStats.personal > 0 || todoStats.work > 0) && (
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { href: '/todos?tab=personal', icon: '👤', label: 'Personal', count: todoStats.personal },
-            { href: '/todos?tab=work',     icon: '💼', label: 'Work',     count: todoStats.work },
-          ].map(s => (
-            <Link key={s.href} href={s.href}
-              className="card-sm flex items-center gap-3 transition-opacity active:opacity-70">
-              <span className="text-xl">{s.icon}</span>
+          {/* 1. HERO HEADER */}
+          <div className="card space-y-3" style={{ border: `1px solid ${urgencyColor}30` }}>
+            <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs text-muted">{s.label}</p>
-                <p className="text-xl font-bold" style={{ color: s.count > 5 ? '#f59e0b' : 'var(--foreground)' }}>{s.count}</p>
-                <p className="text-[10px] text-muted">open</p>
+                <p className="text-xs text-muted">
+                  {now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
+                </p>
+                <p className="text-lg font-bold mt-0.5">{greetingEmoji} {greeting}!</p>
+                <p className="text-xs mt-0.5" style={{ color: urgencyColor }}>{formatRemaining()}</p>
               </div>
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════
-          5. HABITS — with progress ring + engagement loop
-          Psychological: Variable reward (streak), progress visibility
-      ══════════════════════════════════════════════════════════════ */}
-      <section className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm flex items-center gap-2">✅ Habits</h3>
-          <div className="flex items-center gap-2">
-            {/* Habit completion ring */}
-            <div className="relative" style={{ width: 36, height: 36 }}>
-              <svg width="36" height="36" viewBox="0 0 36 36" className="-rotate-90">
-                <circle cx="18" cy="18" r="14" fill="none" strokeWidth="3.5" stroke="var(--surface-2)" />
-                <circle cx="18" cy="18" r="14" fill="none" strokeWidth="3.5"
-                  stroke={habitRingColor}
-                  strokeDasharray={`${2 * Math.PI * 14}`}
-                  strokeDashoffset={`${2 * Math.PI * 14 * (1 - habitPct / 100)}`}
-                  strokeLinecap="round"
-                  style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
-              </svg>
-              <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold"
-                style={{ color: habitRingColor }}>{habitPct}%</span>
-            </div>
-            <span className="text-xs text-muted">{habitDoneCount}/{habitTotal}</span>
-            <Link href="/habits" className="text-xs" style={{ color: '#14b8a6' }}>Edit →</Link>
-          </div>
-        </div>
-
-        {habits.length === 0 ? (
-          <div className="text-center py-6">
-            <p className="text-sm text-muted mb-3">No habits set up yet.</p>
-            <Link href="/habits" className="text-sm font-medium px-4 py-2 rounded-xl"
-              style={{ background: '#14b8a6', color: 'white' }}>Set up habits →</Link>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {displayHabits.map(habit => {
-              const done = habitsDone.has(habit.habitId)
-              const pop  = xpPops.find(p => p.habitId === habit.habitId)
-              return (
-                <button key={habit.id} onClick={() => toggleHabit(habit)}
-                  className="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
-                  style={{
-                    background: done ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)',
-                    border: done ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
-                    transform: done ? 'none' : 'none',
-                  }}>
-                  {pop && <XpPop amount={pop.amount} onDone={() => setXpPops(p => p.filter(x => x.id !== pop.id))} />}
-                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all ${done ? '' : 'border-2'}`}
-                    style={done
-                      ? { background: '#22c55e', color: 'white' }
-                      : { borderColor: habit.priority === 1 ? '#ef4444' : habit.priority === 2 ? '#f59e0b' : '#6b7280' }}>
-                    {done ? '✓' : ''}
-                  </span>
-                  <span className="text-sm flex-1 leading-snug"
-                    style={{ textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--muted)' : 'var(--foreground)' }}>
-                    {habit.emoji && <span className="mr-1">{habit.emoji}</span>}{habit.name}
-                  </span>
-                  {done && <span className="text-xs font-bold" style={{ color: '#22c55e' }}>✓</span>}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        {/* Habit completion celebration */}
-        {habitTotal > 0 && habitDoneCount === habitTotal && (
-          <div className="mt-3 text-center py-2 rounded-xl"
-            style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
-            <p className="text-sm font-semibold" style={{ color: '#22c55e' }}>🎉 All habits done today! +10 XP each</p>
-          </div>
-        )}
-      </section>
-
-      {/* ═══════════════════════════════════════════════════════════
-          6. 7-DAY HABIT STREAK — visual trend
-          Psychological: Streak loss aversion (don't break the chain)
-      ══════════════════════════════════════════════════════════════ */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm">📈 This Week</h3>
-          {weeklyHabitPct != null && (
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-              style={{
-                background: weeklyHabitPct >= 70 ? 'rgba(34,197,94,0.15)' : weeklyHabitPct >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                color:      weeklyHabitPct >= 70 ? '#22c55e'              : weeklyHabitPct >= 40 ? '#f59e0b'               : '#ef4444',
-              }}>
-              {weeklyHabitPct}% avg
-            </span>
-          )}
-        </div>
-        <div className="flex justify-between gap-1">
-          {Array.from({ length: 7 }).map((_, i) => {
-            const d    = new Date(); d.setDate(d.getDate() - (6 - i))
-            const dStr = d.toISOString().split('T')[0]
-            const dot  = habitDots.find(h => h.date === dStr)
-            const pct  = dot?.total ? dot.done / dot.total : 0
-            const dayLabel = d.toLocaleDateString('en-IN', { weekday: 'short' }).slice(0, 2)
-            const isToday  = dStr === date
-            let bg = 'var(--surface-2)'
-            if (pct >= 0.9) bg = '#22c55e'
-            else if (pct >= 0.6) bg = '#86efac'
-            else if (pct >= 0.3) bg = '#fcd34d'
-            else if (dot) bg = '#fca5a5'
-            return (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                {dot && dot.total > 0 ? (
-                  <span className="text-[9px] font-bold" style={{ color: pct >= 0.6 ? '#22c55e' : '#f59e0b' }}>
-                    {dot.done}/{dot.total}
-                  </span>
-                ) : <span className="text-[9px]">&nbsp;</span>}
-                <div className="w-full rounded-lg"
-                  style={{ height: 28, background: bg, border: isToday ? '2px solid #14b8a6' : '1px solid var(--border)', opacity: dot ? 1 : 0.35 }} />
-                <span className="text-[10px]"
-                  style={{ color: isToday ? '#14b8a6' : 'var(--muted)', fontWeight: isToday ? 600 : 400 }}>
-                  {dayLabel}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════
-          7. COUNTER GOALS — progress toward commitments
-      ══════════════════════════════════════════════════════════════ */}
-      {topCounters.length > 0 && (
-        <section className="card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm">🎯 Counter Goals</h3>
-            <Link href="/counters" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
-          </div>
-          <div className="space-y-3">
-            {topCounters.map(c => {
-              const pct  = Math.min((c.currentCount / c.targetCount) * 100, 100)
-              const done = c.currentCount >= c.targetCount
-              return (
-                <div key={c.id}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm">{c.emoji} {c.name}</span>
-                    <span className="text-xs font-bold" style={{ color: done ? '#22c55e' : c.color }}>
-                      {c.currentCount}/{c.targetCount}
-                    </span>
-                  </div>
-                  <div className="relative w-full rounded-full h-2.5 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
-                    <div className="h-full rounded-full transition-all duration-700"
-                      style={{ width: `${pct}%`, background: done ? '#22c55e' : c.color }} />
-                  </div>
-                  <p className="text-[10px] text-muted mt-0.5 text-right">{Math.round(pct)}%{done ? ' ✓ Complete!' : ''}</p>
+              <div className="relative flex-shrink-0" style={{ width: 64, height: 64 }}>
+                <svg width="64" height="64" viewBox="0 0 64 64" className="-rotate-90">
+                  <circle cx="32" cy="32" r="26" fill="none" strokeWidth="5" stroke="var(--surface-2)" />
+                  <circle cx="32" cy="32" r="26" fill="none" strokeWidth="5"
+                    stroke={urgencyColor}
+                    strokeDasharray={`${2 * Math.PI * 26}`}
+                    strokeDashoffset={`${2 * Math.PI * 26 * (1 - dayPct / 100)}`}
+                    strokeLinecap="round"
+                    style={{ transition: 'stroke-dashoffset 1s linear' }} />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-sm font-bold leading-none" style={{ color: urgencyColor }}>{dayPct}%</span>
+                  <span className="text-[8px] text-muted">day</span>
                 </div>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════
-          8. DUE TODAY — todos with today's due date (non-P1)
-          Psychological: Deadline salience
-      ══════════════════════════════════════════════════════════════ */}
-      {dueTodayTodos.length > 0 && (
-        <section className="card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm flex items-center gap-1.5">📅 Due Today</h3>
-            <Link href="/todos" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
-          </div>
-          <div className="space-y-2">
-            {dueTodayTodos.map(t => (
-              <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
-                style={{ background: 'var(--surface-2)', border: '1px solid rgba(245,158,11,0.25)' }}>
-                <span className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ background: t.priority === 1 ? '#ef4444' : t.priority === 2 ? '#f59e0b' : '#6b7280' }} />
-                <span className="text-sm flex-1 leading-snug">{t.title}</span>
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0"
-                  style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>P{t.priority}</span>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+            </div>
 
-      {/* ═══════════════════════════════════════════════════════════
-          9. AI NEXT 5 ACTIONS — smart recommendations
-          Psychological: Reduces decision fatigue; removes friction
-      ══════════════════════════════════════════════════════════════ */}
-      <section className="card" style={{ border: '1px solid rgba(20,184,166,0.2)' }}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm flex items-center gap-2">⚡ Do This Next</h3>
-          <button onClick={loadNextActions} disabled={aiNextLoading}
-            className="text-xs px-2.5 py-1 rounded-lg disabled:opacity-40"
-            style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>
-            {aiNextLoading ? '⏳' : '↻ Refresh'}
-          </button>
-        </div>
-        {aiNextLoading ? (
-          <div className="flex items-center gap-1.5 py-2">
-            {[0, 0.15, 0.3].map((d, i) => (
-              <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#14b8a6', animationDelay: `${d}s` }} />
-            ))}
-            <span className="text-xs text-muted ml-1">AI is thinking…</span>
-          </div>
-        ) : aiNextActions.length > 0 ? (
-          <div className="space-y-2">
-            {aiNextActions.map((action, i) => {
-              const urgencyColor = action.urgency === 'high' ? '#ef4444' : action.urgency === 'medium' ? '#f59e0b' : '#6b7280'
-              const typeIcon = action.type === 'habit' ? '✅' : action.type === 'todo' ? '📋' : action.type === 'counter' ? '🎯' : '🍅'
-              const typeHref = action.type === 'habit' ? '/habits' : action.type === 'todo' ? '/todos' : action.type === 'counter' ? '/counters' : '/now'
-              return (
-                <Link key={i} href={typeHref}
-                  className="flex items-start gap-3 px-3 py-2.5 rounded-xl transition-opacity active:opacity-70"
-                  style={{ background: 'var(--surface-2)', border: `1px solid ${urgencyColor}20` }}>
-                  <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
-                    <span className="text-base">{typeIcon}</span>
-                    <span className="text-[9px] font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center"
-                      style={{ background: urgencyColor, color: 'white' }}>{i + 1}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium leading-snug">{action.title}</p>
-                    <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--muted)' }}>{action.reason}</p>
-                  </div>
-                  <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5"
-                    style={{ background: `${urgencyColor}15`, color: urgencyColor }}>
-                    {action.urgency}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: 'rgba(168,85,247,0.15)', color: '#a855f7' }}>
+                    Lv {xpLevel}
                   </span>
-                </Link>
-              )
-            })}
-          </div>
-        ) : (
-          <p className="text-xs text-muted py-1">Tap ↻ to get AI-powered action recommendations based on your habits, todos, and counters.</p>
-        )}
-      </section>
+                  {xpToday > 0 && <span className="text-xs" style={{ color: '#a855f7' }}>+{xpToday} today</span>}
+                </div>
+                <span className="text-[10px] text-muted">{xpEarned}/{xpNeeded} XP</span>
+              </div>
+              <div className="w-full rounded-full h-2 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                <div className="h-full rounded-full transition-all duration-700"
+                  style={{ width: `${xpBarPct}%`, background: 'linear-gradient(90deg, #a855f7, #818cf8)' }} />
+              </div>
+            </div>
 
-      {/* ═══════════════════════════════════════════════════════════
-          10. MEDICATIONS CHECKLIST
-      ══════════════════════════════════════════════════════════════ */}
-      {medications.length > 0 && (
-        <section className="card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm">💊 Medications</h3>
-            {isAllMedsTaken && (
-              <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.1)', color: '#22c55e' }}>
-                All taken ✓
-              </span>
+            <div className="flex gap-2">
+              <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'var(--surface-2)' }}>
+                <span className="text-base">😴</span>
+                <div>
+                  <p className="text-[10px] text-muted">Sleep</p>
+                  <p className="text-sm font-bold" style={{ color: todayStats.sleep && todayStats.sleep < 6 ? '#ef4444' : '#818cf8' }}>
+                    {todayStats.sleep ? `${todayStats.sleep}h` : '—'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'var(--surface-2)' }}>
+                <span className="text-base">🍅</span>
+                <div>
+                  <p className="text-[10px] text-muted">Focus</p>
+                  <p className="text-sm font-bold" style={{ color: '#14b8a6' }}>
+                    {todayStats.focus}{focusTotalMins > 0 && <span className="text-[10px] text-muted font-normal"> ({focusTotalMins}m)</span>}
+                  </p>
+                </div>
+              </div>
+              <Link href="/now" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs"
+                style={{ background: 'rgba(20,184,166,0.15)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.3)' }}>
+                ▶ Focus
+              </Link>
+            </div>
+          </div>
+
+          {/* 2. AI COACH */}
+          <div className="card" style={{ border: '1px solid rgba(168,85,247,0.2)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-sm flex items-center gap-2">🤖 AI Coach</h3>
+              <button onClick={() => { setAiLoaded(false); loadAiBrief() }} disabled={aiLoading}
+                className="text-[10px] px-2.5 py-1 rounded-lg disabled:opacity-40"
+                style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
+                {aiLoading ? '⏳' : '↻'}
+              </button>
+            </div>
+            {aiLoading ? (
+              <div className="flex items-center gap-1.5 py-1">
+                {[0, 0.15, 0.3].map((d, i) => (
+                  <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7', animationDelay: `${d}s` }} />
+                ))}
+                <span className="text-xs text-muted ml-1">Analysing your data…</span>
+              </div>
+            ) : aiLoaded ? (
+              <p className="text-sm leading-relaxed">{aiBrief}</p>
+            ) : (
+              <p className="text-xs text-muted">Loading insights…</p>
             )}
           </div>
-          <div className="space-y-2">
-            {medications.map(med => {
-              const taken = medsTaken.has(med.id)
-              return (
-                <button key={med.id} onClick={() => toggleMed(med.id)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
-                  style={{
-                    background: taken ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)',
-                    border: taken ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
-                  }}>
-                  <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 font-bold transition-all"
-                    style={taken
-                      ? { background: '#22c55e', color: 'white' }
-                      : { border: '2px solid var(--border)', color: 'transparent' }}>
-                    {taken ? '✓' : ''}
-                  </span>
-                  <span className="text-sm flex-1">{med.name}{med.dosage && ` · ${med.dosage}`}</span>
-                  <span className="text-xs text-muted capitalize">{med.frequency}</span>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-      )}
 
-      {/* ═══════════════════════════════════════════════════════════
-          11. FOCUS SESSIONS TODAY
-      ══════════════════════════════════════════════════════════════ */}
-      {focusSessions.length > 0 && (
-        <section className="card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm flex items-center gap-2">
-              🍅 Focus Sessions
-              {focusStreak > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>🔥 {focusStreak}d streak</span>}
-            </h3>
-            <Link href="/now" className="text-xs" style={{ color: '#14b8a6' }}>+ Session →</Link>
+          {/* 3. ONE THING */}
+          <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+            style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.25)' }}>
+            <span className="text-xl flex-shrink-0">⭐</span>
+            <input type="text" value={oneThing} onChange={e => setOneThing(e.target.value)}
+              placeholder="My one non-negotiable task today…"
+              className="flex-1 text-sm font-medium outline-none"
+              style={{ background: 'transparent', color: '#818cf8' }} />
           </div>
-          <div className="space-y-2">
-            {focusSessions.map((s, i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl"
-                style={{ background: 'var(--surface-2)' }}>
-                <span className="text-base">🍅</span>
-                <p className="text-sm flex-1 truncate">{s.taskText}</p>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                  style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>{s.durationMins}m</span>
+
+          {/* 4. P1 TODOS */}
+          {p1Todos.length > 0 && (
+            <section className="card">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm flex items-center gap-1.5">🔴 Must Do Today</h3>
+                <Link href="/todos" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+              <div className="space-y-2">
+                {p1Todos.map(t => (
+                  <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                    style={{ background: 'var(--surface-2)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#ef4444' }} />
+                    <span className="text-sm flex-1 leading-snug">{t.title}</span>
+                    <Link href="/now" className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
+                      style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>▶</Link>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
-      {/* ═══════════════════════════════════════════════════════════
-          12. MORNING LOG — weight + burnout mode
-      ══════════════════════════════════════════════════════════════ */}
-      {!burnoutMode && (
-        <section className="card">
-          <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">🌅 Morning Log</h3>
-          <div className="flex items-center gap-3">
-            <span className="text-xl w-8">⚖️</span>
-            <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
-              placeholder="Weight today (kg)" step="0.1"
-              className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
-              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-          </div>
-        </section>
-      )}
+          {/* Todo inbox counts */}
+          {(todoStats.personal > 0 || todoStats.work > 0) && (
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { href: '/todos?tab=personal', icon: '👤', label: 'Personal', count: todoStats.personal },
+                { href: '/todos?tab=work',     icon: '💼', label: 'Work',     count: todoStats.work },
+              ].map(s => (
+                <Link key={s.href} href={s.href}
+                  className="card-sm flex items-center gap-3 transition-opacity active:opacity-70">
+                  <span className="text-xl">{s.icon}</span>
+                  <div>
+                    <p className="text-xs text-muted">{s.label}</p>
+                    <p className="text-xl font-bold" style={{ color: s.count > 5 ? '#f59e0b' : 'var(--foreground)' }}>{s.count}</p>
+                    <p className="text-[10px] text-muted">open</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
 
-      {/* Burnout mode toggle */}
+          {/* 5. HABITS */}
+          <section className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm flex items-center gap-2">✅ Habits</h3>
+              <div className="flex items-center gap-2">
+                <div className="relative" style={{ width: 36, height: 36 }}>
+                  <svg width="36" height="36" viewBox="0 0 36 36" className="-rotate-90">
+                    <circle cx="18" cy="18" r="14" fill="none" strokeWidth="3.5" stroke="var(--surface-2)" />
+                    <circle cx="18" cy="18" r="14" fill="none" strokeWidth="3.5"
+                      stroke={habitRingColor}
+                      strokeDasharray={`${2 * Math.PI * 14}`}
+                      strokeDashoffset={`${2 * Math.PI * 14 * (1 - habitPct / 100)}`}
+                      strokeLinecap="round"
+                      style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold"
+                    style={{ color: habitRingColor }}>{habitPct}%</span>
+                </div>
+                <span className="text-xs text-muted">{habitDoneCount}/{habitTotal}</span>
+                <Link href="/habits" className="text-xs" style={{ color: '#14b8a6' }}>Edit →</Link>
+              </div>
+            </div>
+
+            {habits.length === 0 ? (
+              <div className="text-center py-6">
+                <p className="text-sm text-muted mb-3">No habits set up yet.</p>
+                <Link href="/habits" className="text-sm font-medium px-4 py-2 rounded-xl"
+                  style={{ background: '#14b8a6', color: 'white' }}>Set up habits →</Link>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {displayHabits.map(habit => {
+                  const done = habitsDone.has(habit.habitId)
+                  const pop  = xpPops.find(p => p.habitId === habit.habitId)
+                  return (
+                    <button key={habit.id} onClick={() => toggleHabit(habit)}
+                      className="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
+                      style={{
+                        background: done ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)',
+                        border: done ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
+                      }}>
+                      {pop && <XpPop amount={pop.amount} onDone={() => setXpPops(p => p.filter(x => x.id !== pop.id))} />}
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all ${done ? '' : 'border-2'}`}
+                        style={done
+                          ? { background: '#22c55e', color: 'white' }
+                          : { borderColor: habit.priority === 1 ? '#ef4444' : habit.priority === 2 ? '#f59e0b' : '#6b7280' }}>
+                        {done ? '✓' : ''}
+                      </span>
+                      <span className="text-sm flex-1 leading-snug"
+                        style={{ textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--muted)' : 'var(--foreground)' }}>
+                        {habit.emoji && <span className="mr-1">{habit.emoji}</span>}{habit.name}
+                      </span>
+                      {done && <span className="text-xs font-bold" style={{ color: '#22c55e' }}>✓</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {habitTotal > 0 && habitDoneCount === habitTotal && (
+              <div className="mt-3 text-center py-2 rounded-xl"
+                style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                <p className="text-sm font-semibold" style={{ color: '#22c55e' }}>🎉 All habits done today! +10 XP each</p>
+              </div>
+            )}
+          </section>
+
+          {/* 6. 7-DAY HABIT STREAK */}
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm">📈 This Week</h3>
+              {weeklyHabitPct != null && (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{
+                    background: weeklyHabitPct >= 70 ? 'rgba(34,197,94,0.15)' : weeklyHabitPct >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                    color:      weeklyHabitPct >= 70 ? '#22c55e' : weeklyHabitPct >= 40 ? '#f59e0b' : '#ef4444',
+                  }}>
+                  {weeklyHabitPct}% avg
+                </span>
+              )}
+            </div>
+            <div className="flex justify-between gap-1">
+              {Array.from({ length: 7 }).map((_, i) => {
+                const d    = new Date(); d.setDate(d.getDate() - (6 - i))
+                const dStr = d.toISOString().split('T')[0]
+                const dot  = habitDots.find(h => h.date === dStr)
+                const pct  = dot?.total ? dot.done / dot.total : 0
+                const dayLabel = d.toLocaleDateString('en-IN', { weekday: 'short' }).slice(0, 2)
+                const isToday  = dStr === date
+                let bg = 'var(--surface-2)'
+                if (pct >= 0.9) bg = '#22c55e'
+                else if (pct >= 0.6) bg = '#86efac'
+                else if (pct >= 0.3) bg = '#fcd34d'
+                else if (dot) bg = '#fca5a5'
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    {dot && dot.total > 0
+                      ? <span className="text-[9px] font-bold" style={{ color: pct >= 0.6 ? '#22c55e' : '#f59e0b' }}>{dot.done}/{dot.total}</span>
+                      : <span className="text-[9px]">&nbsp;</span>}
+                    <div className="w-full rounded-lg"
+                      style={{ height: 28, background: bg, border: isToday ? '2px solid #14b8a6' : '1px solid var(--border)', opacity: dot ? 1 : 0.35 }} />
+                    <span className="text-[10px]"
+                      style={{ color: isToday ? '#14b8a6' : 'var(--muted)', fontWeight: isToday ? 600 : 400 }}>
+                      {dayLabel}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+        </div>{/* end LEFT column */}
+
+        {/* ── RIGHT COLUMN ─────────────────────────────────── */}
+        <div className="space-y-4 mt-4 lg:mt-0">
+
+          {/* 7. AI NEXT 5 ACTIONS */}
+          <section className="card" style={{ border: '1px solid rgba(20,184,166,0.2)' }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm flex items-center gap-2">⚡ Do This Next</h3>
+              <button onClick={loadNextActions} disabled={aiNextLoading}
+                className="text-xs px-2.5 py-1 rounded-lg disabled:opacity-40"
+                style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>
+                {aiNextLoading ? '⏳' : '↻ Refresh'}
+              </button>
+            </div>
+            {aiNextLoading ? (
+              <div className="flex items-center gap-1.5 py-2">
+                {[0, 0.15, 0.3].map((d, i) => (
+                  <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#14b8a6', animationDelay: `${d}s` }} />
+                ))}
+                <span className="text-xs text-muted ml-1">AI is thinking…</span>
+              </div>
+            ) : aiNextActions.length > 0 ? (
+              <div className="space-y-2">
+                {aiNextActions.map((action, i) => {
+                  const uColor = action.urgency === 'high' ? '#ef4444' : action.urgency === 'medium' ? '#f59e0b' : '#6b7280'
+                  const typeIcon = action.type === 'habit' ? '✅' : action.type === 'todo' ? '📋' : action.type === 'counter' ? '🎯' : '🍅'
+                  const typeHref = action.type === 'habit' ? '/habits' : action.type === 'todo' ? '/todos' : action.type === 'counter' ? '/counters' : '/now'
+                  return (
+                    <Link key={i} href={typeHref}
+                      className="flex items-start gap-3 px-3 py-2.5 rounded-xl transition-opacity active:opacity-70"
+                      style={{ background: 'var(--surface-2)', border: `1px solid ${uColor}20` }}>
+                      <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+                        <span className="text-base">{typeIcon}</span>
+                        <span className="text-[9px] font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center"
+                          style={{ background: uColor, color: 'white' }}>{i + 1}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium leading-snug">{action.title}</p>
+                        <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--muted)' }}>{action.reason}</p>
+                      </div>
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5"
+                        style={{ background: `${uColor}15`, color: uColor }}>{action.urgency}</span>
+                    </Link>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-muted py-1">Tap ↻ to get AI-powered recommendations based on your habits, todos &amp; counters.</p>
+            )}
+          </section>
+
+          {/* 8. COUNTER GOALS */}
+          {topCounters.length > 0 && (
+            <section className="card">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm">🎯 Counter Goals</h3>
+                <Link href="/counters" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
+              </div>
+              <div className="space-y-3">
+                {topCounters.map(c => {
+                  const pct  = Math.min((c.currentCount / c.targetCount) * 100, 100)
+                  const done = c.currentCount >= c.targetCount
+                  return (
+                    <div key={c.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm">{c.emoji} {c.name}</span>
+                        <span className="text-xs font-bold" style={{ color: done ? '#22c55e' : c.color }}>
+                          {c.currentCount}/{c.targetCount}
+                        </span>
+                      </div>
+                      <div className="relative w-full rounded-full h-2.5 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                        <div className="h-full rounded-full transition-all duration-700"
+                          style={{ width: `${pct}%`, background: done ? '#22c55e' : c.color }} />
+                      </div>
+                      <p className="text-[10px] text-muted mt-0.5 text-right">{Math.round(pct)}%{done ? ' ✓ Complete!' : ''}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* 9. DUE TODAY */}
+          {dueTodayTodos.length > 0 && (
+            <section className="card">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm flex items-center gap-1.5">📅 Due Today</h3>
+                <Link href="/todos" className="text-xs" style={{ color: '#14b8a6' }}>All →</Link>
+              </div>
+              <div className="space-y-2">
+                {dueTodayTodos.map(t => (
+                  <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                    style={{ background: 'var(--surface-2)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                    <span className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ background: t.priority === 1 ? '#ef4444' : t.priority === 2 ? '#f59e0b' : '#6b7280' }} />
+                    <span className="text-sm flex-1 leading-snug">{t.title}</span>
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0"
+                      style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>P{t.priority}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* 10. MEDICATIONS */}
+          {medications.length > 0 && (
+            <section className="card">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm">💊 Medications</h3>
+                {isAllMedsTaken && (
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.1)', color: '#22c55e' }}>
+                    All taken ✓
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2">
+                {medications.map(med => {
+                  const taken = medsTaken.has(med.id)
+                  return (
+                    <button key={med.id} onClick={() => toggleMed(med.id)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
+                      style={{
+                        background: taken ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)',
+                        border: taken ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
+                      }}>
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 font-bold transition-all"
+                        style={taken ? { background: '#22c55e', color: 'white' } : { border: '2px solid var(--border)', color: 'transparent' }}>
+                        {taken ? '✓' : ''}
+                      </span>
+                      <span className="text-sm flex-1">{med.name}{med.dosage && ` · ${med.dosage}`}</span>
+                      <span className="text-xs text-muted capitalize">{med.frequency}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* 11. FOCUS SESSIONS TODAY */}
+          {focusSessions.length > 0 && (
+            <section className="card">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm flex items-center gap-2">
+                  🍅 Focus Sessions
+                  {focusStreak > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>🔥 {focusStreak}d</span>}
+                </h3>
+                <Link href="/now" className="text-xs" style={{ color: '#14b8a6' }}>+ Session →</Link>
+              </div>
+              <div className="space-y-2">
+                {focusSessions.map((s, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl" style={{ background: 'var(--surface-2)' }}>
+                    <span className="text-base">🍅</span>
+                    <p className="text-sm flex-1 truncate">{s.taskText}</p>
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                      style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>{s.durationMins}m</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* 12. MORNING LOG */}
+          {!burnoutMode && (
+            <section className="card">
+              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">🌅 Morning Log</h3>
+              <div className="flex items-center gap-3">
+                <span className="text-xl w-8">⚖️</span>
+                <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
+                  placeholder="Weight today (kg)" step="0.1"
+                  className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+              </div>
+            </section>
+          )}
+
+        </div>{/* end RIGHT column */}
+
+      </div>{/* end desktop-two-col */}
+
+      {/* ── Full-width footer: burnout toggle + save ── */}
       <div className="flex justify-end">
         <button onClick={() => setBurnoutMode(v => !v)}
           className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full"
@@ -840,9 +808,6 @@ export default function CommandCenterPage() {
         </button>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════
-          13. SAVE — completes the daily loop (+20 XP)
-      ══════════════════════════════════════════════════════════════ */}
       <button onClick={handleSave} disabled={saving}
         className="w-full py-4 rounded-2xl font-semibold text-sm disabled:opacity-50"
         style={{ background: saved ? '#22c55e' : '#14b8a6', color: 'white', boxShadow: '0 4px 15px rgba(20,184,166,0.3)' }}>
