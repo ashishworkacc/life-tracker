@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { useDarkMode } from '@/lib/hooks/useDarkMode'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { queryDocuments, where, todayDate } from '@/lib/firebase/db'
+import { calcLevel } from '@/lib/xp'
 
 const NAV_SECTIONS = [
   {
@@ -56,7 +57,7 @@ export default function SideNav() {
     ]).then(([xpDocs, events]) => {
       const total = xpDocs[0]?.xpTotal ?? 0
       const todayXp = (events as any[]).reduce((s: number, e: { xpEarned?: number }) => s + (e.xpEarned ?? 0), 0)
-      const level = Math.floor(total / 200) + 1
+      const level = calcLevel(total)
       setXp({ level, xpToday: todayXp })
     }).catch(() => {})
   }, [user])

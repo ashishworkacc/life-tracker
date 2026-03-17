@@ -4,8 +4,9 @@ import { aiComplete } from '@/lib/ai/client'
 export async function POST(req: NextRequest) {
   try {
     const {
-      habits, todos, sleep, focusSessions, timeOfDay, date,
+      habits, todos, sleep, focusSessions, timeOfDay, date, dayOfWeek,
       weeklyHabitPct, xpLevel, xpToday, todoStats, topCounters,
+      atRiskHabits, last3DayRates, activeGoalTitles,
     } = await req.json()
 
     const habitsDone = habits?.done ?? 0
@@ -22,7 +23,6 @@ export async function POST(req: NextRequest) {
         }).join('\n')
       : '  • No counters set up'
 
-    // Build a situation descriptor for richer context
     const habitStatus = habitsDone === habitsTotal && habitsTotal > 0 ? 'ALL habits done'
       : habitRate >= 70 ? 'most habits done'
       : habitRate >= 40 ? 'some habits done'
@@ -41,30 +41,58 @@ export async function POST(req: NextRequest) {
     const todoStatus = totalPending === 0 ? 'inbox clear'
       : `${pendingWork} work + ${pendingPersonal} personal tasks open`
 
-    const prompt = `CONTEXT: It is ${timeOfDay} on ${date}. User is at XP Level ${xpLevel ?? 1} and earned ${xpToday ?? 0} XP today.
+    const trendLine = last3DayRates?.length === 3
+      ? `Last 3 days habit rates: ${last3DayRates[0]}% → ${last3DayRates[1]}% → ${last3DayRates[2]}% (today)`
+      : 'Not enough multi-day trend data yet'
+
+    const atRiskLine = atRiskHabits?.length
+      ? `AT-RISK habits not done yet: ${(atRiskHabits as string[]).join(', ')}`
+      : 'No at-risk habits'
+
+    const goalsLine = activeGoalTitles?.length
+      ? `Active long-term goals: ${(activeGoalTitles as string[]).join('; ')}`
+      : 'No long-term goals set'
+
+    // Use a random seed phrase so AI varies its angle each call
+    const angles = [
+      'Focus on the trend over today\'s absolute numbers.',
+      'Identify what\'s blocking the user from completing their remaining habits.',
+      'Connect one pending habit to the long-term goals if possible.',
+      'Highlight the most important single action to shift momentum right now.',
+      'Assess whether the sleep data explains today\'s performance.',
+      'Call out whether the user is ahead or behind their weekly average.',
+    ]
+    const angle = angles[Math.floor(Math.random() * angles.length)]
+
+    const prompt = `CONTEXT: It is ${timeOfDay} on ${dayOfWeek ?? ''}, ${date}. XP Level ${xpLevel ?? 1}, earned ${xpToday ?? 0} XP today.
 
 TODAY'S NUMBERS:
 - Habits: ${habitsDone}/${habitsTotal} done (${habitRate}%) — ${habitStatus}
-- Sleep last night: ${sleepStatus}
+- Sleep: ${sleepStatus}
 - Focus: ${focusStatus}
-- Todos: ${todoStatus} (${todos?.p1Pending ?? 0} P1 still pending, completed ${todos?.completedToday ?? 0} today)
+- Todos: ${todoStatus} (${todos?.p1Pending ?? 0} P1 pending, ${todos?.completedToday ?? 0} completed today)
 
-THIS WEEK:
-- Habit completion avg: ${weeklyHabitPct != null ? weeklyHabitPct + '%' : 'not enough data yet'}
+TREND: ${trendLine}
+WEEKLY AVG: ${weeklyHabitPct != null ? weeklyHabitPct + '%' : 'not enough data'}
+${atRiskLine}
 
 COUNTER GOALS:
 ${counterLines}
 
-STRICT RULES FOR YOUR RESPONSE:
-1. Start with a SPECIFIC observation using actual numbers (e.g. "You've knocked out 4/6 habits at ${habitRate}%…")
-2. Identify ONE concrete trend or pattern from the data (not generic praise)
-3. Give ONE specific action the user should take in the next hour based on what's missing
-4. Max 3 sentences. Be direct and honest — if numbers are bad, say so with empathy.
-5. NEVER use: "Great job!", "Keep it up!", "You're doing well", "Amazing", "Fantastic" or any other filler praise.
-6. Use the user's actual numbers every time.`
+${goalsLine}
+
+YOUR ANGLE TODAY: ${angle}
+
+STRICT RULES:
+1. Start with a SPECIFIC observation using actual numbers from this data.
+2. Identify ONE concrete trend or pattern — not generic.
+3. Give ONE specific action to take in the next hour based on what's missing or at-risk.
+4. Max 3 sentences. Direct and honest — if numbers are bad, say so with empathy.
+5. NEVER use filler: "Great job!", "Keep it up!", "Amazing", "Fantastic", "You're doing well".
+6. Every sentence must reference at least one real number or named item from the data above.`
 
     const result = await aiComplete(
-      'You are a no-nonsense personal productivity coach. You give data-driven, honest, specific insights. You always reference exact numbers. You never use generic motivational filler.',
+      'You are a no-nonsense personal productivity coach. You give data-driven, honest, specific insights. You always reference exact numbers and named items. You vary your angle each time — sometimes focus on trends, sometimes on blockers, sometimes on goals. You never use generic motivational filler.',
       prompt
     )
 

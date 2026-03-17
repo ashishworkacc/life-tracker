@@ -8,6 +8,29 @@ const FOCUS_PRESETS = [25, 30, 45, 60]
 const SHORT_BREAK_PRESETS = [5, 10]
 const LONG_BREAK_PRESETS = [15, 20]
 const SESSIONS_BEFORE_LONG = 4
+const LS_KEY = 'pomo_session'
+
+interface PomoSession {
+  endsAt: number       // wall-clock timestamp when timer ends (0 if paused)
+  phase: Phase
+  taskText: string
+  focusMins: number
+  sessionCount: number
+  isPaused: boolean
+  pausedSecondsLeft: number  // seconds left at time of pause
+}
+
+function savePomoToLS(s: Partial<PomoSession>) {
+  const prev = loadPomoFromLS()
+  localStorage.setItem(LS_KEY, JSON.stringify({ ...prev, ...s }))
+}
+function loadPomoFromLS(): PomoSession | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+function clearPomoLS() { localStorage.removeItem(LS_KEY) }
 
 type Phase = 'select' | 'focus' | 'short-break' | 'long-break' | 'done'
 type TaskTab = 'p1' | 'work' | 'habits' | 'counters'
@@ -73,24 +96,60 @@ export default function PomodoroPage() {
     loadTodayStats()
   }, [user])
 
-  // Timer tick
+  // Restore in-progress session from localStorage on mount
+  useEffect(() => {
+    const stored = loadPomoFromLS()
+    if (!stored || stored.phase === 'select' || stored.phase === 'done') return
+    if (stored.isPaused) {
+      setPhase(stored.phase); setSessionCount(stored.sessionCount ?? 0)
+      setFocusMins(stored.focusMins); setIsPaused(true)
+      setSecondsLeft(stored.pausedSecondsLeft)
+      setSelectedTask({ id: 'restored', title: stored.taskText, type: 'p1' as const })
+    } else if (stored.endsAt > Date.now()) {
+      setPhase(stored.phase); setSessionCount(stored.sessionCount ?? 0)
+      setFocusMins(stored.focusMins); setIsPaused(false)
+      setSecondsLeft(Math.round((stored.endsAt - Date.now()) / 1000))
+      setSelectedTask({ id: 'restored', title: stored.taskText, type: 'p1' as const })
+    } else {
+      // Timer already expired while away — treat as phase end
+      clearPomoLS()
+    }
+  }, [])
+
+  // Timer tick using wall-clock time so it works across tab switches
   useEffect(() => {
     if ((phase === 'focus' || phase === 'short-break' || phase === 'long-break') && !isPaused) {
+      const stored = loadPomoFromLS()
+      const endsAt = stored?.endsAt ?? 0
+      if (endsAt <= 0) return
       intervalRef.current = setInterval(() => {
-        setSecondsLeft(s => {
-          if (s <= 1) {
-            clearInterval(intervalRef.current!)
-            handlePhaseEnd()
-            return 0
-          }
-          return s - 1
-        })
-      }, 1000)
+        const remaining = Math.round((endsAt - Date.now()) / 1000)
+        if (remaining <= 0) {
+          clearInterval(intervalRef.current!)
+          setSecondsLeft(0)
+          handlePhaseEnd()
+        } else {
+          setSecondsLeft(remaining)
+        }
+      }, 500)
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [phase, isPaused])
+
+  // Sync when tab becomes visible again
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== 'visible' || isPaused) return
+      const stored = loadPomoFromLS()
+      if (!stored || !stored.endsAt) return
+      const remaining = Math.round((stored.endsAt - Date.now()) / 1000)
+      if (remaining <= 0) { handlePhaseEnd() } else { setSecondsLeft(remaining) }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [isPaused])
 
   function handlePhaseEnd() {
     if (soundEnabled) playBeep(520, 0.8)
@@ -103,18 +162,19 @@ export default function PomodoroPage() {
 
       const isLongBreak = newCount % SESSIONS_BEFORE_LONG === 0
       if (autoStartBreak) {
-        if (isLongBreak) {
-          setPhase('long-break')
-          setSecondsLeft(longBreakMins * 60)
-        } else {
-          setPhase('short-break')
-          setSecondsLeft(shortBreakMins * 60)
-        }
+        const breakMins = isLongBreak ? longBreakMins : shortBreakMins
+        const nextPhase = isLongBreak ? 'long-break' : 'short-break'
+        const endsAt = Date.now() + breakMins * 60 * 1000
+        savePomoToLS({ phase: nextPhase as Phase, endsAt, isPaused: false, pausedSecondsLeft: 0 })
+        setPhase(nextPhase)
+        setSecondsLeft(breakMins * 60)
       } else {
+        clearPomoLS()
         setPhase('done')
       }
     } else {
       // Break ended → back to select
+      clearPomoLS()
       setPhase('select')
       setSecondsLeft(focusMins * 60)
       if (soundEnabled) setTimeout(() => playBeep(880, 0.4), 300)
@@ -174,6 +234,8 @@ export default function PomodoroPage() {
   function startFocus(task: PickableTask | null) {
     const taskToStart = task ?? (customTask.trim() ? { id: 'custom', title: customTask.trim(), type: 'p1' as const } : null)
     if (!taskToStart) return
+    const endsAt = Date.now() + focusMins * 60 * 1000
+    savePomoToLS({ phase: 'focus', endsAt, taskText: taskToStart.title, focusMins, sessionCount, isPaused: false, pausedSecondsLeft: 0 })
     setSelectedTask(taskToStart)
     setPhase('focus')
     setSecondsLeft(focusMins * 60)
@@ -216,21 +278,28 @@ export default function PomodoroPage() {
 
     if (autoStartBreak) {
       const isLong = newCount % SESSIONS_BEFORE_LONG === 0
-      setPhase(isLong ? 'long-break' : 'short-break')
-      setSecondsLeft((isLong ? longBreakMins : shortBreakMins) * 60)
+      const breakMins = isLong ? longBreakMins : shortBreakMins
+      const nextPhase = isLong ? 'long-break' : 'short-break'
+      const endsAt = Date.now() + breakMins * 60 * 1000
+      savePomoToLS({ phase: nextPhase as Phase, endsAt, isPaused: false, pausedSecondsLeft: 0 })
+      setPhase(nextPhase)
+      setSecondsLeft(breakMins * 60)
     } else {
+      clearPomoLS()
       setPhase('done')
     }
   }
 
   function skipBreak() {
     clearInterval(intervalRef.current!)
+    clearPomoLS()
     setPhase('select')
     setSecondsLeft(focusMins * 60)
   }
 
   function cancelFocus() {
     clearInterval(intervalRef.current!)
+    clearPomoLS()
     setPhase('select')
     setSecondsLeft(focusMins * 60)
     setSelectedTask(null)
@@ -355,7 +424,18 @@ export default function PomodoroPage() {
         {/* Controls */}
         <div className="flex gap-3 w-full max-w-xs">
           <button
-            onClick={() => setIsPaused(p => !p)}
+            onClick={() => {
+              const next = !isPaused
+              setIsPaused(next)
+              if (next) {
+                // Pausing: save seconds remaining, clear endsAt
+                savePomoToLS({ isPaused: true, pausedSecondsLeft: secondsLeft, endsAt: 0 })
+              } else {
+                // Resuming: recalculate endsAt from now
+                const endsAt = Date.now() + secondsLeft * 1000
+                savePomoToLS({ isPaused: false, endsAt, pausedSecondsLeft: 0 })
+              }
+            }}
             className="flex-1 py-3 rounded-xl text-sm font-medium"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
             {isPaused ? '▶ Resume' : '⏸ Pause'}

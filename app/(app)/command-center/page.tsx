@@ -8,6 +8,7 @@ import {
 } from '@/lib/firebase/db'
 import type { DocumentData } from 'firebase/firestore'
 import Link from 'next/link'
+import { calcLevel, xpToNextLevel, xpInCurrentLevel } from '@/lib/xp'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface HabitRow { id: string; habitId: string; name: string; emoji?: string; priority: number; scheduledTime: string }
@@ -17,17 +18,18 @@ interface CounterSummary { id: string; name: string; emoji: string; currentCount
 interface HabitDot  { date: string; done: number; total: number }
 interface PomodoroSession { taskText: string; durationMins: number; timestamp: string }
 interface NextAction { title: string; type: 'habit' | 'todo' | 'counter' | 'focus'; reason: string; urgency: 'high' | 'medium' | 'low' }
+interface GoalSummary { id: string; title: string; currentValue: number; targetValue: number; startValue: number; deadline?: string }
 
-// ─── XP math ────────────────────────────────────────────────────────────────
-const XP_PER_LEVEL = 200
+// ─── XP math (uses shared lib/xp.ts) ────────────────────────────────────────
 function xpProgress(xpTotal: number) {
-  const level  = Math.floor(xpTotal / XP_PER_LEVEL) + 1
-  const earned = xpTotal % XP_PER_LEVEL
-  return { level, earned, needed: XP_PER_LEVEL }
+  const level  = calcLevel(xpTotal)
+  const earned = xpInCurrentLevel(xpTotal)
+  const needed = xpToNextLevel(level)
+  return { level, earned, needed }
 }
 
-const DAY_START = 6
-const DAY_END   = 23
+const DAY_START = 0
+const DAY_END   = 24
 
 function getDateStr(daysAgo: number) {
   const d = new Date(); d.setDate(d.getDate() - daysAgo)
@@ -86,6 +88,9 @@ export default function CommandCenterPage() {
   const [aiNextActions, setAiNextActions] = useState<NextAction[]>([])
   const [aiNextLoading, setAiNextLoading] = useState(false)
   const [dataLoaded, setDataLoaded] = useState(false)
+  const [foodStats, setFoodStats] = useState({ calories: 0, protein: 0 })
+  const [oneThingTodoId, setOneThingTodoId] = useState('')
+  const [activeGoals, setActiveGoals] = useState<GoalSummary[]>([])
 
   // ── UI state ──
   const [oneThing, setOneThing] = useState('')
@@ -109,10 +114,17 @@ export default function CommandCenterPage() {
     return () => clearInterval(t)
   }, [user])
 
-  // Auto-load AI brief + next actions when data ready
+  // Auto-load AI brief when data ready; respect 2h cache so content varies
   useEffect(() => {
-    if (dataLoaded && !aiLoaded && !aiLoading) loadAiBrief()
-    if (dataLoaded) loadNextActions()
+    if (!dataLoaded || aiLoaded || aiLoading) return
+    const LS_BRIEF = 'ai_brief_cache'
+    try {
+      const cached = JSON.parse(localStorage.getItem(LS_BRIEF) ?? 'null')
+      if (cached && cached.date === date && Date.now() - cached.ts < 2 * 60 * 60 * 1000) {
+        setAiBrief(cached.brief); setAiLoaded(true); return
+      }
+    } catch { /* ignore */ }
+    loadAiBrief()
   }, [dataLoaded])
 
   async function loadData() {
@@ -122,22 +134,25 @@ export default function CommandCenterPage() {
 
     const [
       habitDocs, logDocs, todosDocs, medDocs, vitalsLogs,
-      pomoDocs, xpDocs, xpEvents, sleepDocs, summaries7d,
+      pomoDocs, xpDocs, xpEvents, sleepDocs,
       counterDocs, pendingTodos, dueTodayDocs,
+      foodLogs, weekHabitLogs, goalDocs,
     ] = await Promise.all([
       queryDocuments('habits',          [where('userId', '==', user.uid), where('isActive', '==', true), orderBy('priority', 'asc')]),
       queryDocuments('daily_habit_logs',[where('userId', '==', user.uid), where('date', '==', date)]),
-      queryDocuments('todos',           [where('userId', '==', user.uid), where('completed', '==', false), where('priority', '==', 1), orderBy('createdAt', 'asc'), limit(5)]),
+      queryDocuments('todos',           [where('userId', '==', user.uid), where('completed', '==', false), where('priority', '==', 1), orderBy('createdAt', 'asc'), limit(10)]),
       queryDocuments('medications',     [where('userId', '==', user.uid), where('isActive', '==', true)]),
       queryDocuments('vitals_logs',     [where('userId', '==', user.uid), where('date', '==', date)]),
       queryDocuments('pomodoro_sessions',[where('userId', '==', user.uid), where('date', '==', date), orderBy('timestamp', 'desc')]),
       queryDocuments('user_xp',         [where('userId', '==', user.uid)]),
       queryDocuments('xp_events',       [where('userId', '==', user.uid), where('date', '==', date)]),
       queryDocuments('sleep_logs',      [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(1)]),
-      queryDocuments('daily_summaries', [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(7)]),
       queryDocuments('custom_counters', [where('userId', '==', user.uid)]),
       queryDocuments('todos',           [where('userId', '==', user.uid), where('completed', '==', false)]),
       queryDocuments('todos',           [where('userId', '==', user.uid), where('completed', '==', false), where('dueDate', '==', date)]),
+      queryDocuments('food_logs',       [where('userId', '==', user.uid), where('date', '==', date)]),
+      queryDocuments('daily_habit_logs',[where('userId', '==', user.uid), orderBy('date', 'desc'), limit(300)]),
+      queryDocuments('goals',           [where('userId', '==', user.uid), where('status', '==', 'active')]),
     ])
 
     const doneSet = new Set(logDocs.map(l => l.habitId as string))
@@ -177,16 +192,25 @@ export default function CommandCenterPage() {
     }
     setFocusStreak(fs)
 
-    // Habit dots
-    const dots = summaries7d.slice(0, 7).reverse().map((s: DocumentData) => ({
-      date: s.date as string, done: s.habitsDone ?? 0, total: s.habitsTotal ?? 0,
-    }))
+    // Habit dots — built directly from daily_habit_logs (not daily_summaries)
+    const habitCount = habitDocs.length
+    const dots: HabitDot[] = Array.from({ length: 7 }).map((_, i) => {
+      const dStr = getDateStr(6 - i)
+      const dayLogs = (weekHabitLogs as DocumentData[]).filter(l => l.date === dStr)
+      const done    = dayLogs.filter(l => l.completed === true).length
+      return { date: dStr, done, total: habitCount }
+    })
     setHabitDots(dots)
-    const validDays = dots.filter((d: HabitDot) => d.total > 0)
+    const validDays = dots.filter(d => d.total > 0 && d.done > 0)
     if (validDays.length > 0) {
-      const avg = validDays.reduce((s: number, d: HabitDot) => s + d.done / d.total, 0) / validDays.length
+      const avg = validDays.reduce((s, d) => s + d.done / d.total, 0) / dots.filter(d => d.total > 0).length
       setWeeklyHabitPct(Math.round(avg * 100))
     }
+
+    // Food stats for today
+    const totCals    = (foodLogs as DocumentData[]).reduce((s, f) => s + (f.calories ?? 0), 0)
+    const totProtein = (foodLogs as DocumentData[]).reduce((s, f) => s + (f.protein   ?? 0), 0)
+    setFoodStats({ calories: Math.round(totCals), protein: Math.round(totProtein) })
 
     // Counters
     setTopCounters(
@@ -209,9 +233,28 @@ export default function CommandCenterPage() {
     // Due today todos (exclude ones already in P1 list)
     setDueTodayTodos(
       dueTodayDocs
-        .filter((t: DocumentData) => t.priority !== 1) // P1 already shown above
+        .filter((t: DocumentData) => t.priority !== 1)
         .slice(0, 5)
         .map((t: DocumentData) => ({ id: t.id, title: t.title, priority: t.priority, category: t.category }))
+    )
+
+    // Active goals (sorted by nearest deadline then by progress)
+    setActiveGoals(
+      (goalDocs as DocumentData[])
+        .map(g => ({
+          id: g.id, title: g.title,
+          currentValue: g.currentValue ?? g.startValue ?? 0,
+          targetValue: g.targetValue ?? 100,
+          startValue: g.startValue ?? 0,
+          deadline: g.deadline,
+        }))
+        .sort((a, b) => {
+          if (a.deadline && b.deadline) return a.deadline.localeCompare(b.deadline)
+          if (a.deadline) return -1
+          if (b.deadline) return 1
+          return 0
+        })
+        .slice(0, 3)
     )
 
     setDataLoaded(true)
@@ -283,22 +326,44 @@ export default function CommandCenterPage() {
       const completedToday = await queryDocuments('todos', [
         where('userId', '==', user.uid), where('completed', '==', true), where('completedAt', '>=', date),
       ])
+
+      // Build last-3-day habit completion rates for trend
+      const last3DayRates: number[] = habitDots.slice(-3).map(d =>
+        d.total > 0 ? Math.round((d.done / d.total) * 100) : 0
+      )
+
+      // At-risk habits: not done today + it's afternoon/evening
+      const atRiskHabits: string[] = hour >= 15
+        ? habits
+            .filter(h => !habitsDone.has(h.habitId))
+            .map(h => h.name)
+            .slice(0, 4)
+        : []
+
+      const dayOfWeek = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()]
+      const activeGoalTitles = activeGoals.map(g => g.title)
+
       const res = await fetch('/api/ai/daily-brief', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          date, timeOfDay,
+          date, timeOfDay, dayOfWeek,
           habits: { done: habitsDone.size, total: habits.length },
           todos: { p1Pending: p1Todos.length, completedToday: completedToday.length },
           sleep: todayStats.sleep, focusSessions: todayStats.focus,
           weeklyHabitPct, xpLevel: xpProgress(xpTotal).level,
-          xpToday, todoStats,
+          xpToday, todoStats, atRiskHabits, last3DayRates, activeGoalTitles,
           topCounters: topCounters.map(c => ({ name: c.name, currentCount: c.currentCount, targetCount: c.targetCount })),
         }),
       })
       const data = await res.json()
-      setAiBrief(data.brief ?? '')
+      const brief = data.brief ?? ''
+      setAiBrief(brief)
       setAiLoaded(true)
+      // Cache for 2h
+      try {
+        localStorage.setItem('ai_brief_cache', JSON.stringify({ brief, date, ts: Date.now() }))
+      } catch { /* ignore */ }
     } catch {
       setAiBrief("Focus on your top priority — that's the highest leverage action right now.")
       setAiLoaded(true)
@@ -327,7 +392,10 @@ export default function CommandCenterPage() {
   // ── Derived ──
   const { level: xpLevel, earned: xpEarned, needed: xpNeeded } = xpProgress(xpTotal)
   const xpBarPct = Math.round((xpEarned / xpNeeded) * 100)
-  const displayHabits = burnoutMode ? habits.filter(h => h.priority === 1).slice(0, 3) : habits
+  // Only show pending (not-yet-done) habits in Today view; done habits are hidden here
+  const displayHabits = burnoutMode
+    ? habits.filter(h => h.priority === 1 && !habitsDone.has(h.habitId)).slice(0, 3)
+    : habits.filter(h => !habitsDone.has(h.habitId))
   const habitDoneCount = habitsDone.size
   const habitTotal = displayHabits.length
   const habitPct = habitTotal > 0 ? Math.round((habitDoneCount / habitTotal) * 100) : 0
@@ -429,7 +497,47 @@ export default function CommandCenterPage() {
             </div>
           </div>
 
-          {/* 2. AI COACH */}
+          {/* 2. NORTH STAR GOALS */}
+          {activeGoals.length > 0 && (
+            <div className="card" style={{ border: '1px solid rgba(251,191,36,0.3)' }}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm flex items-center gap-1.5">🎯 Your North Star</h3>
+                <Link href="/goals" className="text-[10px] px-2.5 py-1 rounded-lg"
+                  style={{ background: 'rgba(251,191,36,0.1)', color: '#f59e0b' }}>
+                  All goals →
+                </Link>
+              </div>
+              <div className="space-y-3">
+                {activeGoals.slice(0, 2).map(goal => {
+                  const range = Math.abs(goal.targetValue - goal.startValue)
+                  const progress = range > 0 ? Math.abs(goal.currentValue - goal.startValue) / range : 0
+                  const pct = Math.round(Math.min(progress, 1) * 100)
+                  const daysLeft = goal.deadline
+                    ? Math.ceil((new Date(goal.deadline).getTime() - Date.now()) / 86400000)
+                    : null
+                  return (
+                    <div key={goal.id} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium truncate flex-1 mr-2">{goal.title}</p>
+                        <span className="text-xs font-bold flex-shrink-0" style={{ color: '#f59e0b' }}>{pct}%</span>
+                      </div>
+                      <div className="w-full rounded-full h-1.5 overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                        <div className="h-full rounded-full transition-all duration-700"
+                          style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #f59e0b, #fbbf24)' }} />
+                      </div>
+                      {daysLeft !== null && (
+                        <p className="text-[10px] text-muted">
+                          {daysLeft > 0 ? `${daysLeft}d until deadline` : daysLeft === 0 ? '⚠️ Due today' : `${Math.abs(daysLeft)}d overdue`}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 3. AI COACH */}
           <div className="card" style={{ border: '1px solid rgba(168,85,247,0.2)' }}>
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-sm flex items-center gap-2">🤖 AI Coach</h3>
@@ -453,14 +561,42 @@ export default function CommandCenterPage() {
             )}
           </div>
 
-          {/* 3. ONE THING */}
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+          {/* 3. ONE THING — pick from P1 todos */}
+          <div className="px-4 py-3 rounded-xl space-y-2"
             style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.25)' }}>
-            <span className="text-xl flex-shrink-0">⭐</span>
-            <input type="text" value={oneThing} onChange={e => setOneThing(e.target.value)}
-              placeholder="My one non-negotiable task today…"
-              className="flex-1 text-sm font-medium outline-none"
-              style={{ background: 'transparent', color: '#818cf8' }} />
+            <div className="flex items-center gap-2">
+              <span className="text-lg flex-shrink-0">⭐</span>
+              <span className="text-xs font-semibold" style={{ color: '#818cf8' }}>One Non-Negotiable Today</span>
+            </div>
+            {p1Todos.length > 0 ? (
+              <select
+                value={oneThingTodoId || '__custom__'}
+                onChange={e => {
+                  const val = e.target.value
+                  setOneThingTodoId(val === '__custom__' ? '' : val)
+                  if (val !== '__custom__') {
+                    const t = p1Todos.find(t => t.id === val)
+                    setOneThing(t?.title ?? '')
+                  } else {
+                    setOneThing('')
+                  }
+                }}
+                className="w-full px-3 py-2 rounded-xl text-sm font-medium outline-none"
+                style={{ background: 'rgba(129,140,248,0.15)', border: '1px solid rgba(129,140,248,0.4)', color: '#818cf8' }}>
+                <option value="__custom__">— Choose a P1 todo —</option>
+                {p1Todos.map(t => (
+                  <option key={t.id} value={t.id}>{t.title}</option>
+                ))}
+              </select>
+            ) : (
+              <input type="text" value={oneThing} onChange={e => setOneThing(e.target.value)}
+                placeholder="No P1 todos — type your one thing…"
+                className="w-full px-3 py-2 rounded-xl text-sm font-medium outline-none"
+                style={{ background: 'rgba(129,140,248,0.15)', border: '1px solid rgba(129,140,248,0.4)', color: '#818cf8' }} />
+            )}
+            {oneThingTodoId && oneThing && (
+              <p className="text-[10px]" style={{ color: '#818cf8' }}>✓ {oneThing}</p>
+            )}
           </div>
 
           {/* 4. P1 TODOS */}
@@ -777,19 +913,28 @@ export default function CommandCenterPage() {
             </section>
           )}
 
-          {/* 12. MORNING LOG */}
-          {!burnoutMode && (
-            <section className="card">
-              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">🌅 Morning Log</h3>
-              <div className="flex items-center gap-3">
-                <span className="text-xl w-8">⚖️</span>
-                <input type="number" value={weight} onChange={e => setWeight(e.target.value)}
-                  placeholder="Weight today (kg)" step="0.1"
-                  className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
-                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+          {/* 12. FOOD LOG */}
+          <section className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm flex items-center gap-2">🥗 Food Today</h3>
+              <Link href="/trackers/food" className="text-xs px-2.5 py-1 rounded-lg"
+                style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>+ Log Meal</Link>
+            </div>
+            {foodStats.calories > 0 ? (
+              <div className="flex gap-3">
+                <div className="flex-1 text-center px-3 py-2 rounded-xl" style={{ background: 'var(--surface-2)' }}>
+                  <p className="text-lg font-bold" style={{ color: '#f59e0b' }}>{foodStats.calories}</p>
+                  <p className="text-[10px] text-muted">calories</p>
+                </div>
+                <div className="flex-1 text-center px-3 py-2 rounded-xl" style={{ background: 'var(--surface-2)' }}>
+                  <p className="text-lg font-bold" style={{ color: '#14b8a6' }}>{foodStats.protein}g</p>
+                  <p className="text-[10px] text-muted">protein</p>
+                </div>
               </div>
-            </section>
-          )}
+            ) : (
+              <p className="text-xs text-muted">No meals logged yet today.</p>
+            )}
+          </section>
 
         </div>{/* end RIGHT column */}
 

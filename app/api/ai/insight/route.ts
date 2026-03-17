@@ -41,6 +41,12 @@ export async function POST(req: NextRequest) {
       case 'sleep-anomaly':
         result = await aiComplete(SYSTEM_PROMPTS.sleepAnomaly, JSON.stringify(data))
         break
+      case 'bad-habits':
+        result = await aiComplete(
+          'You are a behavioral change coach using Atomic Habits principles. Analyze patterns in bad habit logs. Be specific — reference actual entries — and give actionable advice.',
+          typeof data === 'string' ? data : JSON.stringify(data)
+        )
+        break
       default:
         return NextResponse.json({ error: 'Unknown insight type' }, { status: 400 })
     }

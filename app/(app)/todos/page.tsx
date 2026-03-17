@@ -4,11 +4,13 @@ import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { addDocument, queryDocuments, updateDocument, deleteDocument, todayDate, where } from '@/lib/firebase/db'
+import type { DocumentData } from 'firebase/firestore'
 
 interface SubTask {
   id: string
   title: string
   done: boolean
+  source?: 'ai' | 'manual'  // 'ai' = AI-generated; 'manual' = user-added
 }
 
 interface Todo {
@@ -50,6 +52,7 @@ function TodosContent() {
   const [newPriority, setNewPriority] = useState<1 | 2 | 3>(2)
   const [newDueDate, setNewDueDate] = useState('')
   const [newSubTasks, setNewSubTasks] = useState<SubTask[]>([])
+  const [newSubInput, setNewSubInput] = useState('')
   const [adding, setAdding] = useState(false)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
 
@@ -61,6 +64,7 @@ function TodosContent() {
   const [editPriority, setEditPriority] = useState<1 | 2 | 3>(2)
   const [editDueDate, setEditDueDate] = useState('')
   const [editBreakdownLoading, setEditBreakdownLoading] = useState(false)
+  const [editSubInput, setEditSubInput] = useState('')
 
   useEffect(() => { if (!user) return; loadTodos() }, [user])
 
@@ -93,10 +97,13 @@ function TodosContent() {
         id: `st-${Date.now()}-${i}`,
         title: typeof s === 'string' ? s : s.title ?? String(s),
         done: false,
+        source: 'ai' as const,
       }))
       if (isEdit && todoId) {
         const todo = todos.find(t => t.id === todoId)
-        const merged = [...(todo?.subTasks ?? []).filter(e => !steps.some(s => s.title === e.title)), ...steps]
+        // Keep manually-added subtasks; replace all AI-generated ones with the new batch
+        const manualSubTasks = (todo?.subTasks ?? []).filter(e => e.source === 'manual')
+        const merged = [...manualSubTasks, ...steps]
         await updateDocument('todos', todoId, { subTasks: merged })
         setTodos(prev => prev.map(t => t.id === todoId ? { ...t, subTasks: merged } : t))
       } else {
@@ -124,7 +131,21 @@ function TodosContent() {
     if (!user) return
     const newCompleted = !todo.completed
     await updateDocument('todos', todo.id, { completed: newCompleted, completedAt: newCompleted ? new Date().toISOString() : null })
-    if (newCompleted) await addDocument('xp_events', { userId: user.uid, date: today, eventType: 'todo', xpEarned: 10, description: `Completed todo: ${todo.title}` })
+    if (newCompleted) {
+      await addDocument('xp_events', { userId: user.uid, date: today, eventType: 'todo', xpEarned: 10, description: `Completed todo: ${todo.title}` })
+      const xpDocs = await queryDocuments('user_xp', [where('userId', '==', user.uid)])
+      if (xpDocs.length > 0) await updateDocument('user_xp', xpDocs[0].id, { xpTotal: (xpDocs[0].xpTotal ?? 0) + 10 })
+      else await addDocument('user_xp', { userId: user.uid, xpTotal: 10, level: 1 })
+    } else {
+      // Reverse XP
+      const evts = await queryDocuments('xp_events', [
+        where('userId', '==', user.uid), where('date', '==', today), where('eventType', '==', 'todo'),
+      ])
+      const evt = (evts as DocumentData[]).find(e => e.description?.includes(todo.title))
+      if (evt) await deleteDocument('xp_events', evt.id)
+      const xpDocs = await queryDocuments('user_xp', [where('userId', '==', user.uid)])
+      if (xpDocs.length > 0) await updateDocument('user_xp', xpDocs[0].id, { xpTotal: Math.max(0, (xpDocs[0].xpTotal ?? 0) - 10) })
+    }
     setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, completed: newCompleted, completedAt: newCompleted ? new Date().toISOString() : undefined } : t))
   }
 
@@ -254,19 +275,43 @@ function TodosContent() {
               style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--muted)' }} />
           </div>
 
+          {/* Sub-tasks: manual add */}
+          <div>
+            <label className="text-xs text-muted mb-1.5 block">🧩 Sub-tasks</label>
+            <div className="flex gap-2">
+              <input value={newSubInput} onChange={e => setNewSubInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && newSubInput.trim()) {
+                    setNewSubTasks(prev => [...prev, { id: `st-${Date.now()}`, title: newSubInput.trim(), done: false, source: 'manual' }])
+                    setNewSubInput('')
+                    e.preventDefault()
+                  }
+                }}
+                placeholder="Add a sub-task (Enter to add)…"
+                className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+              <button onClick={() => {
+                if (!newSubInput.trim()) return
+                setNewSubTasks(prev => [...prev, { id: `st-${Date.now()}`, title: newSubInput.trim(), done: false, source: 'manual' }])
+                setNewSubInput('')
+              }} className="px-3 py-2 rounded-xl text-sm font-semibold"
+                style={{ background: '#14b8a6', color: 'white' }}>+</button>
+            </div>
+          </div>
+
           <button onClick={() => fetchBreakdown(newTitle, false)}
             disabled={!newTitle.trim() || breakdownLoading}
             className="w-full py-2 rounded-xl text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
             style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: '#a855f7' }}>
-            {breakdownLoading ? '🤔 Breaking down…' : '🧩 AI: Break into sub-tasks'}
+            {breakdownLoading ? '🤔 Breaking down…' : '🧩 AI: Generate sub-tasks'}
           </button>
 
           {newSubTasks.length > 0 && (
             <div className="space-y-1.5 pl-3 border-l-2" style={{ borderColor: '#a855f7' }}>
               {newSubTasks.map((s, i) => (
                 <div key={s.id} className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted w-4">{i + 1}.</span>
-                  <p className="text-xs text-muted flex-1">{s.title}</p>
+                  <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: s.source === 'manual' ? 'rgba(20,184,166,0.1)' : 'rgba(168,85,247,0.1)', color: s.source === 'manual' ? '#14b8a6' : '#a855f7' }}>{s.source === 'manual' ? 'manual' : 'AI'}</span>
+                  <p className="text-xs flex-1">{s.title}</p>
                   <button onClick={() => setNewSubTasks(prev => prev.filter(x => x.id !== s.id))}
                     className="text-[10px]" style={{ color: '#ef4444' }}>✕</button>
                 </div>
@@ -450,16 +495,45 @@ function TodosContent() {
                               className="flex-1 px-2 py-1.5 rounded-lg text-xs outline-none"
                               style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--muted)' }} />
                           </div>
+                          {/* Manual subtask add */}
+                          <div className="flex gap-1.5">
+                            <input value={editSubInput} onChange={e => setEditSubInput(e.target.value)}
+                              onKeyDown={async e => {
+                                if (e.key === 'Enter' && editSubInput.trim()) {
+                                  const newSub: SubTask = { id: `st-${Date.now()}`, title: editSubInput.trim(), done: false, source: 'manual' }
+                                  const updated = [...todo.subTasks, newSub]
+                                  await updateDocument('todos', todo.id, { subTasks: updated })
+                                  setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, subTasks: updated } : t))
+                                  setEditSubInput('')
+                                  e.preventDefault()
+                                }
+                              }}
+                              placeholder="Add sub-task (Enter)…"
+                              className="flex-1 px-2 py-1.5 rounded-xl text-xs outline-none"
+                              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+                            <button onClick={async () => {
+                              if (!editSubInput.trim()) return
+                              const newSub: SubTask = { id: `st-${Date.now()}`, title: editSubInput.trim(), done: false, source: 'manual' }
+                              const updated = [...todo.subTasks, newSub]
+                              await updateDocument('todos', todo.id, { subTasks: updated })
+                              setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, subTasks: updated } : t))
+                              setEditSubInput('')
+                            }} className="px-2.5 py-1.5 rounded-xl text-xs font-semibold"
+                              style={{ background: '#14b8a6', color: 'white' }}>+</button>
+                          </div>
                           <button onClick={() => fetchBreakdown(editTitle, true, todo.id)}
                             disabled={!editTitle.trim() || editBreakdownLoading}
                             className="w-full py-1.5 rounded-xl text-xs font-medium disabled:opacity-40 flex items-center justify-center gap-1.5"
                             style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: '#a855f7' }}>
-                            {editBreakdownLoading ? '🤔 Breaking down…' : '🧩 Regenerate sub-tasks with AI'}
+                            {editBreakdownLoading ? '🤔 Breaking down…' : '🧩 Regenerate AI sub-tasks (replaces AI ones, keeps manual)'}
                           </button>
                           {todo.subTasks.length > 0 && (
                             <div className="space-y-1 pl-2 border-l-2" style={{ borderColor: '#a855f7' }}>
                               {todo.subTasks.map(s => (
-                                <p key={s.id} className="text-[10px] text-muted">{s.done ? '✓' : '○'} {s.title}</p>
+                                <div key={s.id} className="flex items-center gap-1.5">
+                                  <span className="text-[8px] px-1 rounded" style={{ background: s.source === 'manual' ? 'rgba(20,184,166,0.1)' : 'rgba(168,85,247,0.1)', color: s.source === 'manual' ? '#14b8a6' : '#a855f7' }}>{s.source === 'manual' ? 'm' : 'ai'}</span>
+                                  <p className="text-[10px] text-muted">{s.done ? '✓' : '○'} {s.title}</p>
+                                </div>
                               ))}
                             </div>
                           )}

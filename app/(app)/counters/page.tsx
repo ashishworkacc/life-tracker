@@ -128,14 +128,6 @@ export default function CountersPage() {
   async function loadData() {
     if (!user) return
     const counterDocs = await queryDocuments('custom_counters', [where('userId', '==', user.uid)])
-    setCounters(counterDocs.map(c => ({
-      id: c.id, name: c.name, emoji: c.emoji ?? '🎯', unit: c.unit ?? '',
-      targetCount: c.targetCount ?? 100, initialCount: c.initialCount ?? 0,
-      deadline: c.deadline, currentCount: c.currentCount ?? 0,
-      color: c.color ?? '#14b8a6', xpPerIncrement: c.xpPerIncrement ?? 15,
-      reward: c.reward ?? '',
-      createdAt: c.createdAt?.toDate?.()?.toISOString?.() ?? (typeof c.createdAt === 'string' ? c.createdAt : undefined),
-    })))
     const logDocs = await queryDocuments('counter_logs', [
       where('userId', '==', user.uid), orderBy('date', 'desc'),
     ])
@@ -145,6 +137,24 @@ export default function CountersPage() {
       grouped[l.counterId].push({ id: l.id, date: l.date, countAdded: l.countAdded ?? 1 })
     }
     setLogs(grouped)
+
+    // Sort counters by usage frequency (log entries in last 30 days, descending)
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30)
+    const cutoffStr = cutoff.toISOString().split('T')[0]
+    const sortedCounters = counterDocs
+      .map(c => ({
+        id: c.id, name: c.name, emoji: c.emoji ?? '🎯', unit: c.unit ?? '',
+        targetCount: c.targetCount ?? 100, initialCount: c.initialCount ?? 0,
+        deadline: c.deadline, currentCount: c.currentCount ?? 0,
+        color: c.color ?? '#14b8a6', xpPerIncrement: c.xpPerIncrement ?? 15,
+        reward: c.reward ?? '',
+        createdAt: c.createdAt?.toDate?.()?.toISOString?.() ?? (typeof c.createdAt === 'string' ? c.createdAt : undefined),
+        _freq: (grouped[c.id] ?? []).filter(l => l.date >= cutoffStr).length,
+      }))
+      .sort((a, b) => b._freq - a._freq)
+      .map(({ _freq: _, ...c }) => c)
+
+    setCounters(sortedCounters)
     setLoading(false)
   }
 
