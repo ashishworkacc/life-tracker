@@ -79,6 +79,7 @@ Custom counters: ${counters.map((c: any) => `${c.name}: ${c.currentCount}/${c.ta
         body: JSON.stringify({
           messages: newMessages.slice(-10), // last 10 messages for context
           context,
+          userId: user?.uid,
         })
       })
 

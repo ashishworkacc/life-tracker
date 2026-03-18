@@ -7,7 +7,8 @@ import {
   todayDate, where, orderBy
 } from '@/lib/firebase/db'
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
+  BarChart, Bar, Cell,
 } from 'recharts'
 
 interface Counter {
@@ -516,6 +517,49 @@ export default function CountersPage() {
                     <p style={{ color: '#a855f7' }}>🎁 Reward: <strong>{counter.reward}</strong></p>
                   </div>
                 )}
+
+                {/* Daily increments bar chart */}
+                {counterLogs.length > 0 && (() => {
+                  const last14: { date: string; added: number; pct: number }[] = []
+                  for (let i = 13; i >= 0; i--) {
+                    const d = new Date(); d.setDate(d.getDate() - i)
+                    const ds = d.toISOString().split('T')[0]
+                    const added = counterLogs.filter(l => l.date === ds).reduce((s, l) => s + l.countAdded, 0)
+                    const cumulSoFar = chartData.find(p => p.date === ds)?.count ?? 0
+                    const pct = counter.targetCount > 0 ? Math.min(Math.round((cumulSoFar / counter.targetCount) * 100), 100) : 0
+                    last14.push({ date: ds, added, pct })
+                  }
+                  const hasData = last14.some(d => d.added > 0)
+                  if (!hasData) return null
+                  return (
+                    <div className="mt-2 mb-2">
+                      <p className="text-[10px] text-muted mb-1 font-semibold uppercase">Daily increments (last 14 days)</p>
+                      <ResponsiveContainer width="100%" height={60}>
+                        <BarChart data={last14} margin={{ top: 2, right: 2, left: -30, bottom: 0 }}>
+                          <XAxis dataKey="date" hide />
+                          <YAxis hide />
+                          <Tooltip
+                            formatter={(val: any) => [`+${val}${displayUnit}`, 'Added']}
+                            labelFormatter={(l: any) => new Date(l + 'T12:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                            contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }}
+                          />
+                          <Bar dataKey="added" radius={[3, 3, 0, 0]}>
+                            {last14.map((entry, idx) => (
+                              <Cell key={idx} fill={entry.added > 0 ? counter.color : 'var(--surface-2)'} opacity={entry.added > 0 ? 0.85 : 0.3} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                      <div className="flex justify-between text-[10px] text-muted px-1">
+                        <span>{new Date(last14[0].date + 'T12:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                        <span style={{ color: counter.color }}>
+                          {Math.min(Math.round((counter.currentCount / counter.targetCount) * 100), 100)}% of target
+                        </span>
+                        <span>Today</span>
+                      </div>
+                    </div>
+                  )
+                })()}
 
                 {menuId === counter.id && (
                   <div className="flex gap-2 mt-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>

@@ -28,7 +28,27 @@
       "Bash(npx --yes firebase-tools --version)",
       "Bash(cat -n /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/counters/page.tsx)",
       "Bash(wc -l /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/counters/page.tsx)",
-      "Bash(ls -la /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/trackers/)"
+      "Bash(ls -la /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/trackers/)",
+      "Bash(firebase deploy:*)",
+      "Bash(npx firebase-tools:*)",
+      "Bash(ls /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/trackers/)",
+      "Bash(cat /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/todos/page.tsx)",
+      "Bash(cat /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/now/page.tsx)",
+      "Bash(wc -l /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/command-center/page.tsx)",
+      "Bash(head -150 /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/command-center/page.tsx)",
+      "Bash(cat /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/ai-insights/page.tsx)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)",
+      "Bash(git config:*)",
+      "Bash(git merge:*)",
+      "Bash(wc -l /Users/ashish/Documents/Life_Tracker/app/\\\\\\(app\\\\\\)/habits/page.tsx)",
+      "Bash(vercel --version)",
+      "Bash(npx vercel:*)",
+      "Bash(gh repo:*)",
+      "Bash(grep -r electricity /Users/ashish/Documents/Life_Tracker --include=*.tsx --include=*.ts)"
     ]
   }
 }

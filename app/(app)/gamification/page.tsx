@@ -66,18 +66,24 @@ export default function GamificationPage() {
       ]),
     ])
 
-    if (xpDocs.length > 0) {
-      setTotalXP(xpDocs[0].totalXP ?? 0)
-      setLevel(xpDocs[0].level ?? 1)
-    } else {
-      // Calculate from events
-      const total = eventDocs.reduce((s, e) => s + (e.xpEarned ?? 0), 0)
-      setTotalXP(total)
-      // Determine level
-      let lvl = 1
-      while (xpForLevel(lvl + 1) <= total) lvl++
-      setLevel(lvl)
+    // Always recompute from xp_events to ensure accuracy
+    const computedTotal = eventDocs.reduce((s, e) => s + (e.xpEarned ?? 0), 0)
+    const storedTotal = xpDocs[0]?.xpTotal ?? 0
+
+    let actualTotal = computedTotal
+    if (xpDocs.length > 0 && Math.abs(computedTotal - storedTotal) > 0) {
+      // Repair: stored total is out of sync — update it
+      try {
+        const { updateDocument: upd } = await import('@/lib/firebase/db')
+        await upd('user_xp', xpDocs[0].id, { xpTotal: computedTotal })
+      } catch { /* ignore */ }
     }
+
+    let lvl = 1
+    let acc = 0
+    while (acc + xpForLevel(lvl) <= actualTotal) { acc += xpForLevel(lvl); lvl++ }
+    setTotalXP(actualTotal)
+    setLevel(lvl)
 
     setBadges(badgeDocs.map(b => ({
       id: b.id,

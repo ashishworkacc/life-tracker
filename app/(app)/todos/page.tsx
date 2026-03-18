@@ -438,17 +438,25 @@ function TodosContent() {
                             <div className="space-y-1.5 pt-2">
                               <p className="text-[10px] text-muted font-semibold uppercase tracking-wide">Sub-tasks</p>
                               {todo.subTasks.map(s => (
-                                <button key={s.id} onClick={() => toggleSubTask(todo, s.id)}
-                                  className="w-full flex items-center gap-2 text-left py-0.5">
-                                  <span className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
-                                    style={{ background: s.done ? '#22c55e' : 'transparent', border: s.done ? 'none' : '1.5px solid var(--border)' }}>
-                                    {s.done && <span className="text-white text-[9px]">✓</span>}
-                                  </span>
-                                  <span className="text-xs flex-1"
-                                    style={{ textDecoration: s.done ? 'line-through' : 'none', color: s.done ? 'var(--muted)' : 'var(--foreground)' }}>
-                                    {s.title}
-                                  </span>
-                                </button>
+                                <div key={s.id} className="flex items-center gap-2">
+                                  <button onClick={() => toggleSubTask(todo, s.id)}
+                                    className="flex-1 flex items-center gap-2 text-left py-0.5">
+                                    <span className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
+                                      style={{ background: s.done ? '#22c55e' : 'transparent', border: s.done ? 'none' : '1.5px solid var(--border)' }}>
+                                      {s.done && <span className="text-white text-[9px]">✓</span>}
+                                    </span>
+                                    <span className="text-xs flex-1"
+                                      style={{ textDecoration: s.done ? 'line-through' : 'none', color: s.done ? 'var(--muted)' : 'var(--foreground)' }}>
+                                      {s.title}
+                                    </span>
+                                  </button>
+                                  <button onClick={async () => {
+                                    const updated = todo.subTasks.filter(st => st.id !== s.id)
+                                    await updateDocument('todos', todo.id, { subTasks: updated })
+                                    setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, subTasks: updated } : t))
+                                  }} className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0"
+                                    style={{ color: 'var(--muted)', background: 'transparent' }}>✕</button>
+                                </div>
                               ))}
                             </div>
                           )}
@@ -531,8 +539,14 @@ function TodosContent() {
                             <div className="space-y-1 pl-2 border-l-2" style={{ borderColor: '#a855f7' }}>
                               {todo.subTasks.map(s => (
                                 <div key={s.id} className="flex items-center gap-1.5">
-                                  <span className="text-[8px] px-1 rounded" style={{ background: s.source === 'manual' ? 'rgba(20,184,166,0.1)' : 'rgba(168,85,247,0.1)', color: s.source === 'manual' ? '#14b8a6' : '#a855f7' }}>{s.source === 'manual' ? 'm' : 'ai'}</span>
-                                  <p className="text-[10px] text-muted">{s.done ? '✓' : '○'} {s.title}</p>
+                                  <span className="text-[8px] px-1 rounded flex-shrink-0" style={{ background: s.source === 'manual' ? 'rgba(20,184,166,0.1)' : 'rgba(168,85,247,0.1)', color: s.source === 'manual' ? '#14b8a6' : '#a855f7' }}>{s.source === 'manual' ? 'm' : 'ai'}</span>
+                                  <p className="text-[10px] text-muted flex-1">{s.done ? '✓' : '○'} {s.title}</p>
+                                  <button onClick={async () => {
+                                    const updated = todo.subTasks.filter(st => st.id !== s.id)
+                                    await updateDocument('todos', todo.id, { subTasks: updated })
+                                    setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, subTasks: updated } : t))
+                                  }} className="text-[10px] px-1 py-0.5 rounded flex-shrink-0"
+                                    style={{ color: '#ef4444', background: 'transparent' }}>✕</button>
                                 </div>
                               ))}
                             </div>

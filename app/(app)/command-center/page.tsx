@@ -79,6 +79,7 @@ export default function CommandCenterPage() {
   const [todayStats, setTodayStats] = useState({ sleep: null as number | null, focus: 0 })
   const [xpToday, setXpToday]   = useState(0)
   const [xpTotal, setXpTotal]   = useState(0)
+  const [xpDocId, setXpDocId]   = useState<string | null>(null)
   const [habitDots, setHabitDots] = useState<HabitDot[]>([])
   const [weeklyHabitPct, setWeeklyHabitPct] = useState<number | null>(null)
   const [topCounters, setTopCounters] = useState<CounterSummary[]>([])
@@ -105,6 +106,9 @@ export default function CommandCenterPage() {
   const [aiBrief, setAiBrief]   = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiLoaded, setAiLoaded] = useState(false)
+  const [quickThought, setQuickThought] = useState('')
+  const [savingThought, setSavingThought] = useState(false)
+  const [userThoughts, setUserThoughts] = useState<string[]>([])
 
   // ── Auto-refresh every 5 minutes ──
   useEffect(() => {
@@ -114,13 +118,16 @@ export default function CommandCenterPage() {
     return () => clearInterval(t)
   }, [user])
 
-  // Auto-load AI brief when data ready; respect 2h cache so content varies
+  // Auto-load AI brief when data ready; clear cache if new day
   useEffect(() => {
     if (!dataLoaded || aiLoaded || aiLoading) return
     const LS_BRIEF = 'ai_brief_cache'
     try {
       const cached = JSON.parse(localStorage.getItem(LS_BRIEF) ?? 'null')
-      if (cached && cached.date === date && Date.now() - cached.ts < 2 * 60 * 60 * 1000) {
+      // Clear cache if it's a new day
+      if (cached && cached.date !== date) {
+        localStorage.removeItem(LS_BRIEF)
+      } else if (cached && cached.date === date && Date.now() - cached.ts < 2 * 60 * 60 * 1000) {
         setAiBrief(cached.brief); setAiLoaded(true); return
       }
     } catch { /* ignore */ }
@@ -168,6 +175,7 @@ export default function CommandCenterPage() {
 
     const xpTotalVal = xpDocs[0]?.xpTotal ?? 0
     setXpTotal(xpTotalVal)
+    if (xpDocs[0]?.id) setXpDocId(xpDocs[0].id)
     const todayXp = xpEvents.reduce((s: number, e: DocumentData) => s + (e.xpEarned ?? 0), 0)
     setXpToday(todayXp)
 
@@ -269,7 +277,18 @@ export default function CommandCenterPage() {
       newDone.add(habit.habitId)
       await addDocument('xp_events', { userId: user.uid, date, eventType: 'habit', xpEarned: 10, description: `Completed: ${habit.name}` })
       setXpToday(p => p + 10)
-      setXpTotal(p => p + 10)
+      setXpTotal(p => {
+        const newTotal = p + 10
+        // Persist to Firestore
+        if (xpDocId) {
+          updateDocument('user_xp', xpDocId, { xpTotal: newTotal })
+        } else {
+          addDocument('user_xp', { userId: user.uid, xpTotal: newTotal }).then(doc => {
+            if (doc?.id) setXpDocId(doc.id)
+          }).catch(() => {})
+        }
+        return newTotal
+      })
       // Show XP pop-up
       const id = ++xpPopIdRef.current
       setXpPops(p => [...p, { id, amount: 10, habitId: habit.habitId }])
@@ -319,13 +338,36 @@ export default function CommandCenterPage() {
     setAiNextLoading(false)
   }
 
+  async function saveQuickThought() {
+    if (!user || !quickThought.trim()) return
+    setSavingThought(true)
+    try {
+      await addDocument('activity_logs', {
+        userId: user.uid, date, text: quickThought.trim(),
+        activityTag: 'thought', timestamp: new Date().toISOString(), hour: new Date().getHours(),
+      })
+      setUserThoughts(prev => [quickThought.trim(), ...prev].slice(0, 5))
+      setQuickThought('')
+    } catch { /* ignore */ }
+    setSavingThought(false)
+  }
+
   async function loadAiBrief() {
     if (!user || aiLoading) return
     setAiLoading(true)
+    // Clear cache so a fresh call is made
+    try { localStorage.removeItem('ai_brief_cache') } catch { /* ignore */ }
     try {
-      const completedToday = await queryDocuments('todos', [
-        where('userId', '==', user.uid), where('completed', '==', true), where('completedAt', '>=', date),
+      const [completedToday, recentThoughts] = await Promise.all([
+        queryDocuments('todos', [
+          where('userId', '==', user.uid), where('completed', '==', true), where('completedAt', '>=', date),
+        ]),
+        queryDocuments('activity_logs', [
+          where('userId', '==', user.uid), where('date', '==', date), where('activityTag', '==', 'thought'),
+        ]),
       ])
+      const thoughtTexts = recentThoughts.map(l => l.text as string).filter(Boolean).slice(0, 5)
+      setUserThoughts(thoughtTexts)
 
       // Build last-3-day habit completion rates for trend
       const last3DayRates: number[] = habitDots.slice(-3).map(d =>
@@ -354,13 +396,14 @@ export default function CommandCenterPage() {
           weeklyHabitPct, xpLevel: xpProgress(xpTotal).level,
           xpToday, todoStats, atRiskHabits, last3DayRates, activeGoalTitles,
           topCounters: topCounters.map(c => ({ name: c.name, currentCount: c.currentCount, targetCount: c.targetCount })),
+          userThoughts: thoughtTexts,
         }),
       })
       const data = await res.json()
       const brief = data.brief ?? ''
       setAiBrief(brief)
       setAiLoaded(true)
-      // Cache for 2h
+      // Cache for 2h with today's date
       try {
         localStorage.setItem('ai_brief_cache', JSON.stringify({ brief, date, ts: Date.now() }))
       } catch { /* ignore */ }
@@ -384,6 +427,14 @@ export default function CommandCenterPage() {
     }))
     promises.push(addDocument('xp_events', { userId: user.uid, date, eventType: 'command_center', xpEarned: 20, description: 'Saved Daily Command Center' }))
     await Promise.all(promises)
+    const newTotal = xpTotal + 20
+    if (xpDocId) {
+      await updateDocument('user_xp', xpDocId, { xpTotal: newTotal })
+    } else {
+      const ref = await addDocument('user_xp', { userId: user.uid, xpTotal: newTotal })
+      if (ref?.id) setXpDocId(ref.id)
+    }
+    setXpTotal(newTotal)
     setXpToday(p => p + 20)
     setSaving(false); setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -538,15 +589,41 @@ export default function CommandCenterPage() {
           )}
 
           {/* 3. AI COACH */}
-          <div className="card" style={{ border: '1px solid rgba(168,85,247,0.2)' }}>
-            <div className="flex items-center justify-between mb-2">
+          <div className="card space-y-3" style={{ border: '1px solid rgba(168,85,247,0.2)' }}>
+            <div className="flex items-center justify-between">
               <h3 className="font-semibold text-sm flex items-center gap-2">🤖 AI Coach</h3>
               <button onClick={() => { setAiLoaded(false); loadAiBrief() }} disabled={aiLoading}
                 className="text-[10px] px-2.5 py-1 rounded-lg disabled:opacity-40"
                 style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
-                {aiLoading ? '⏳' : '↻'}
+                {aiLoading ? '⏳' : '↻ Refresh'}
               </button>
             </div>
+
+            {/* Quick thought input */}
+            <div className="flex gap-2">
+              <input
+                value={quickThought}
+                onChange={e => setQuickThought(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { saveQuickThought(); e.preventDefault() } }}
+                placeholder="💭 Share a thought… (affects AI suggestions)"
+                className="flex-1 px-3 py-2 rounded-xl text-xs outline-none"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+              />
+              <button onClick={saveQuickThought} disabled={!quickThought.trim() || savingThought}
+                className="px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
+                style={{ background: 'rgba(168,85,247,0.15)', color: '#a855f7' }}>
+                {savingThought ? '…' : 'Add'}
+              </button>
+            </div>
+
+            {userThoughts.length > 0 && (
+              <div className="space-y-1">
+                {userThoughts.slice(0, 3).map((t, i) => (
+                  <p key={i} className="text-[10px] text-muted italic px-1">💭 {t}</p>
+                ))}
+              </div>
+            )}
+
             {aiLoading ? (
               <div className="flex items-center gap-1.5 py-1">
                 {[0, 0.15, 0.3].map((d, i) => (

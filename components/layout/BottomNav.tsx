@@ -12,11 +12,12 @@ const PRIMARY_NAV = [
 ]
 
 const MORE_SECTIONS = [
-  { href: '/now',      icon: '🍅', label: 'Pomodoro' },
-  { href: '/trackers', icon: '📈', label: 'Trackers' },
-  { href: '/journal',  icon: '📓', label: 'Journal' },
-  { href: '/chat',     icon: '💬', label: 'AI Chat' },
-  { href: '/settings', icon: '⚙️', label: 'Settings' },
+  { href: '/now',       icon: '🍅', label: 'Pomodoro' },
+  { href: '/trackers',  icon: '📈', label: 'Trackers' },
+  { href: '/journal',   icon: '📓', label: 'Journal' },
+  { href: '/cravings',  icon: '⚠️', label: 'Cravings' },
+  { href: '/chat',      icon: '💬', label: 'AI Chat' },
+  { href: '/settings',  icon: '⚙️', label: 'Settings' },
 ]
 
 export default function BottomNav() {

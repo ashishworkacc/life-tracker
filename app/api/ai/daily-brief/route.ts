@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
     const {
       habits, todos, sleep, focusSessions, timeOfDay, date, dayOfWeek,
       weeklyHabitPct, xpLevel, xpToday, todoStats, topCounters,
-      atRiskHabits, last3DayRates, activeGoalTitles,
+      atRiskHabits, last3DayRates, activeGoalTitles, userThoughts,
     } = await req.json()
 
     const habitsDone = habits?.done ?? 0
@@ -80,6 +80,8 @@ COUNTER GOALS:
 ${counterLines}
 
 ${goalsLine}
+
+${userThoughts?.length ? `USER'S OWN THOUGHTS TODAY:\n${(userThoughts as string[]).map((t: string) => `  • "${t}"`).join('\n')}\n(Use these thoughts to personalise your coaching — reference what the user is thinking/feeling.)` : ''}
 
 YOUR ANGLE TODAY: ${angle}
 

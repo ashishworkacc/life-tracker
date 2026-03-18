@@ -46,7 +46,7 @@ function formatDate(dateStr: string) {
 export default function JournalPage() {
   const { user } = useAuth()
   const today = todayDate()
-  const [tab, setTab] = useState<'reflections' | 'lifelog'>('reflections')
+  const [tab, setTab] = useState<'reflections' | 'lifelog' | 'summaries'>('reflections')
 
   // Reflections
   const [reflections, setReflections] = useState<Reflection[]>([])
@@ -67,11 +67,25 @@ export default function JournalPage() {
   const [logMood, setLogMood] = useState<number | null>(null)
   const [savingLog, setSavingLog] = useState(false)
 
+  // Day summaries
+  interface DaySummary { id: string; date: string; content: string; source?: string }
+  const [summaries, setSummaries] = useState<DaySummary[]>([])
+  const [summariesLoading, setSummariesLoading] = useState(false)
+  const [generatingSummary, setGeneratingSummary] = useState(false)
+  const [aiDraft, setAiDraft] = useState('')
+  const [editingSummaryId, setEditingSummaryId] = useState<string | null>(null)
+  const [editingSummaryText, setEditingSummaryText] = useState('')
+
   useEffect(() => {
     if (!user) return
     loadReflections()
     loadActivityLogs()
   }, [user])
+
+  useEffect(() => {
+    if (!user || tab !== 'summaries') return
+    if (summaries.length === 0) loadSummaries()
+  }, [tab, user])
 
   async function loadReflections() {
     if (!user) return
@@ -112,6 +126,78 @@ export default function JournalPage() {
     } finally {
       setLogsLoading(false)
     }
+  }
+
+  async function loadSummaries() {
+    if (!user) return
+    setSummariesLoading(true)
+    try {
+      const docs = await queryDocuments('daily_summaries_ai', [
+        where('userId', '==', user.uid),
+        orderBy('date', 'desc'),
+        limit(30),
+      ])
+      setSummaries(docs.map(d => ({ id: d.id, date: d.date, content: d.content ?? '', source: d.source ?? 'ai' })))
+    } catch { /* ignore */ }
+    setSummariesLoading(false)
+  }
+
+  async function generateDaySummary() {
+    if (!user || generatingSummary) return
+    setGeneratingSummary(true)
+    try {
+      // Fetch today's data
+      const { queryDocuments: qd, where: w, orderBy: ob } = await import('@/lib/firebase/db')
+      const [habitLogs, todos, counters, counterLogs, foodLogs, thoughtLogs, xpEvents] = await Promise.all([
+        qd('daily_habit_logs', [w('userId', '==', user.uid), w('date', '==', today), w('completed', '==', true)]),
+        qd('todos', [w('userId', '==', user.uid), w('completed', '==', true), w('completedAt', '>=', today)]),
+        qd('custom_counters', [w('userId', '==', user.uid)]),
+        qd('counter_logs', [w('userId', '==', user.uid), w('date', '==', today)]),
+        qd('food_logs', [w('userId', '==', user.uid), w('date', '==', today)]),
+        qd('activity_logs', [w('userId', '==', user.uid), w('date', '==', today), w('activityTag', '==', 'thought')]),
+        qd('xp_events', [w('userId', '==', user.uid), w('date', '==', today)]),
+      ])
+
+      const habitsCompleted = habitLogs.map(l => l.habitId as string)
+      const todosCompleted = todos.map(t => t.title as string)
+      const xpEarned = xpEvents.reduce((s, e) => s + (e.xpEarned ?? 0), 0)
+      const thoughtTexts = thoughtLogs.map(l => l.text as string).filter(Boolean)
+      const foodCals = foodLogs.reduce((s, l) => s + (l.calories ?? 0), 0)
+      const foodProtein = foodLogs.reduce((s, l) => s + (l.protein ?? 0), 0)
+
+      const counterUpdates = counterLogs.map(cl => {
+        const c = (counters as any[]).find(ct => ct.id === cl.counterId)
+        return c ? { name: c.name, added: cl.countAdded ?? 0, current: c.currentCount ?? 0, target: c.targetCount ?? 0 } : null
+      }).filter(Boolean)
+
+      const res = await fetch('/api/ai/daily-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid, date: today,
+          habitsCompleted, todosCompleted, countersUpdated: counterUpdates, xpEarned,
+          activityLogs: thoughtTexts,
+          foodSummary: foodCals > 0 ? { calories: Math.round(foodCals), protein: Math.round(foodProtein) } : null,
+        }),
+      })
+      const data = await res.json()
+      setAiDraft(data.summary ?? '')
+    } catch { setAiDraft('Could not generate summary — try again.') }
+    setGeneratingSummary(false)
+  }
+
+  async function saveDaySummary(content: string) {
+    if (!user || !content.trim()) return
+    await addDocument('daily_summaries_ai', { userId: user.uid, date: today, content: content.trim(), source: 'ai', editedByUser: content !== aiDraft })
+    setSummaries(prev => [{ id: Date.now().toString(), date: today, content: content.trim(), source: 'ai' }, ...prev])
+    setAiDraft('')
+  }
+
+  async function updateSummary(id: string, content: string) {
+    await updateDocument('daily_summaries_ai', id, { content, editedByUser: true })
+    setSummaries(prev => prev.map(s => s.id === id ? { ...s, content } : s))
+    setEditingSummaryId(null)
+    setEditingSummaryText('')
   }
 
   function openNewReflection() {
@@ -270,11 +356,11 @@ export default function JournalPage() {
     <div className="pb-4 space-y-4 animate-fade-in">
       {/* Tab switcher */}
       <div className="flex rounded-xl p-1" style={{ background: 'var(--surface)' }}>
-        {(['reflections', 'lifelog'] as const).map(t => (
+        {(['reflections', 'lifelog', 'summaries'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
+            className="flex-1 py-2 rounded-lg text-xs font-medium transition-colors"
             style={{ background: tab === t ? '#14b8a6' : 'transparent', color: tab === t ? 'white' : 'var(--muted)' }}>
-            {t === 'reflections' ? '✍️ Reflections' : '📍 Life Log'}
+            {t === 'reflections' ? '✍️ Reflect' : t === 'lifelog' ? '📍 Life Log' : '📋 Summaries'}
           </button>
         ))}
       </div>
@@ -392,6 +478,85 @@ export default function JournalPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* ─── Day Summaries Tab ─── */}
+      {tab === 'summaries' && (
+        <div className="space-y-4">
+          {/* Generate today's summary */}
+          <div className="card space-y-3" style={{ border: '1px solid rgba(20,184,166,0.2)' }}>
+            <h3 className="font-semibold text-sm">📋 Today&apos;s Day Summary</h3>
+            <p className="text-xs text-muted">AI generates a summary from your habits, todos, counters, and notes. You can edit before saving.</p>
+            {!aiDraft ? (
+              <button onClick={generateDaySummary} disabled={generatingSummary}
+                className="w-full py-3 rounded-xl text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: 'linear-gradient(135deg, #14b8a6, #818cf8)', color: 'white' }}>
+                {generatingSummary ? (
+                  <><span className="animate-spin">⏳</span> Generating…</>
+                ) : '✨ Generate Today\'s Summary'}
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <textarea
+                  value={aiDraft}
+                  onChange={e => setAiDraft(e.target.value)}
+                  rows={4}
+                  className="w-full px-3 py-2.5 rounded-xl text-sm outline-none resize-none"
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+                <div className="flex gap-2">
+                  <button onClick={() => setAiDraft('')}
+                    className="flex-1 py-2 rounded-xl text-xs"
+                    style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>Discard</button>
+                  <button onClick={() => saveDaySummary(aiDraft)}
+                    className="flex-1 py-2 rounded-xl text-xs font-semibold"
+                    style={{ background: '#14b8a6', color: 'white' }}>Save Summary</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* History */}
+          {summariesLoading ? (
+            <div className="text-center py-6"><p className="text-sm text-muted">Loading…</p></div>
+          ) : summaries.length === 0 ? (
+            <div className="text-center py-8 space-y-2">
+              <p className="text-3xl">📋</p>
+              <p className="text-sm font-medium">No summaries yet</p>
+              <p className="text-xs text-muted">Generate your first daily summary above.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold text-muted uppercase">History ({summaries.length})</h3>
+              {summaries.map(s => (
+                <div key={s.id} className="card space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold" style={{ color: '#14b8a6' }}>📅 {formatDate(s.date)}</p>
+                    <button onClick={() => { setEditingSummaryId(s.id); setEditingSummaryText(s.content) }}
+                      className="text-xs px-2 py-1 rounded-lg"
+                      style={{ color: 'var(--muted)' }}>✏️</button>
+                  </div>
+                  {editingSummaryId === s.id ? (
+                    <div className="space-y-2">
+                      <textarea value={editingSummaryText} onChange={e => setEditingSummaryText(e.target.value)}
+                        rows={4} className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
+                        style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+                      <div className="flex gap-2">
+                        <button onClick={() => { setEditingSummaryId(null); setEditingSummaryText('') }}
+                          className="flex-1 py-1.5 rounded-lg text-xs"
+                          style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>Cancel</button>
+                        <button onClick={() => updateSummary(s.id, editingSummaryText)}
+                          className="flex-1 py-1.5 rounded-lg text-xs font-semibold"
+                          style={{ background: '#14b8a6', color: 'white' }}>Save</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm leading-relaxed">{s.content}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

@@ -23,6 +23,7 @@ const NAV_SECTIONS = [
       { href: '/now',      icon: '🍅', label: 'Pomodoro' },
       { href: '/trackers', icon: '📈', label: 'Trackers' },
       { href: '/journal',  icon: '📓', label: 'Journal' },
+      { href: '/cravings', icon: '⚠️', label: 'Cravings' },
     ],
   },
   {

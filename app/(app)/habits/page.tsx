@@ -23,6 +23,7 @@ interface Habit {
   habitType: 'boolean' | 'count'
   targetCount: number
   todayCount: number  // for count-based habits
+  effort: 'small' | 'medium' | 'large'
 }
 
 const TIME_OPTS = ['morning', 'afternoon', 'evening', 'anytime'] as const
@@ -54,6 +55,7 @@ interface HabitFormProps {
   why: string; setWhy: (v: string) => void
   habitType: 'boolean' | 'count'; setHabitType: (v: 'boolean' | 'count') => void
   targetCount: string; setTargetCount: (v: string) => void
+  effort: 'small' | 'medium' | 'large'; setEffort: (v: 'small' | 'medium' | 'large') => void
   aiLoading: boolean
   onSuggestEmoji: () => void
   onSave: () => void; onCancel: () => void; saving: boolean
@@ -63,7 +65,7 @@ function HabitForm({
   isEdit, name, setName, emoji, setEmoji, priority, setPriority,
   isCore, setIsCore, freq, setFreq, weekDays, setWeekDays,
   time, setTime, why, setWhy, habitType, setHabitType, targetCount, setTargetCount,
-  aiLoading, onSuggestEmoji, onSave, onCancel, saving,
+  effort, setEffort, aiLoading, onSuggestEmoji, onSave, onCancel, saving,
 }: HabitFormProps) {
   return (
     <div className="card space-y-3">
@@ -130,6 +132,24 @@ function HabitForm({
             <span className="text-xs text-muted">actions/day</span>
           </div>
         )}
+      </div>
+
+      {/* Effort */}
+      <div>
+        <label className="text-xs text-muted mb-1.5 block">⚡ Effort level</label>
+        <div className="flex gap-2">
+          {([['small', '🟢 Small', '#22c55e'], ['medium', '🟡 Medium', '#f59e0b'], ['large', '🔴 Large', '#ef4444']] as const).map(([val, label, color]) => (
+            <button key={val} onClick={() => setEffort(val)}
+              className="flex-1 py-2 rounded-xl text-xs font-medium"
+              style={{
+                background: effort === val ? `rgba(${val === 'small' ? '34,197,94' : val === 'medium' ? '245,158,11' : '239,68,68'},0.15)` : 'var(--surface-2)',
+                border: effort === val ? `1px solid ${color}` : '1px solid var(--border)',
+                color: effort === val ? color : 'var(--muted)',
+              }}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Frequency */}
@@ -251,6 +271,7 @@ export default function HabitsPage() {
   const [newWhy, setNewWhy] = useState('')
   const [newHabitType, setNewHabitType] = useState<'boolean' | 'count'>('boolean')
   const [newTargetCount, setNewTargetCount] = useState('1')
+  const [newEffort, setNewEffort] = useState<'small' | 'medium' | 'large'>('medium')
   const [saving, setSaving] = useState(false)
   const [aiEmojiLoading, setAiEmojiLoading] = useState(false)
 
@@ -266,27 +287,12 @@ export default function HabitsPage() {
   const [editWhy, setEditWhy] = useState('')
   const [editHabitType, setEditHabitType] = useState<'boolean' | 'count'>('boolean')
   const [editTargetCount, setEditTargetCount] = useState('1')
+  const [editEffort, setEditEffort] = useState<'small' | 'medium' | 'large'>('medium')
   const [editAiLoading, setEditAiLoading] = useState(false)
 
   const emojiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [aiSortLoading, setAiSortLoading] = useState(false)
   const [aiSortedIds, setAiSortedIds] = useState<string[] | null>(null)
-
-  // Page-level tab: habits list vs bad habits tracker
-  const [pageTab, setPageTab] = useState<'habits' | 'bad-habits'>('habits')
-
-  // Bad habits tracker state
-  const [badHabitName, setBadHabitName] = useState('')
-  const [badHabitCue, setBadHabitCue] = useState('')
-  const [badHabitTrigger, setBadHabitTrigger] = useState('')
-  const [badHabitThoughts, setBadHabitThoughts] = useState('')
-  const [badHabitIntensity, setBadHabitIntensity] = useState(3)
-  const [badHabitLogs, setBadHabitLogs] = useState<DocumentData[]>([])
-  const [savingBadHabit, setSavingBadHabit] = useState(false)
-  const [badHabitAiAnalysis, setBadHabitAiAnalysis] = useState('')
-  const [badHabitAiLoading, setBadHabitAiLoading] = useState(false)
-
-  const BAD_HABIT_PRESETS = ['Doomscrolling', 'Late-night snacking', 'Skipping workout', 'Procrastinating', 'Oversleeping', 'Impulse buying', 'Negative self-talk']
 
   useEffect(() => {
     if (!user) return
@@ -397,6 +403,7 @@ export default function HabitsPage() {
           habitType: (h.habitType ?? 'boolean') as 'boolean' | 'count',
           targetCount: h.targetCount ?? 1,
           todayCount: todayLogForHabit?.countValue ?? 0,
+          effort: (h.effort ?? 'medium') as 'small' | 'medium' | 'large',
         }
       }))
     } catch (err) {
@@ -492,10 +499,11 @@ export default function HabitsPage() {
       frequency: newFreq, weekDays: newFreq === 'weekly' ? newWeekDays : [],
       scheduledTime: newTime, why: newWhy.trim(), bestStreak: 0,
       habitType: newHabitType, targetCount: newHabitType === 'count' ? parseInt(newTargetCount) || 1 : 1,
+      effort: newEffort,
     })
     setNewName(''); setNewEmoji(''); setNewPriority(2); setNewIsCore(false)
     setNewFreq('daily'); setNewWeekDays([1, 2, 3, 4, 5]); setNewTime('anytime'); setNewWhy('')
-    setNewHabitType('boolean'); setNewTargetCount('1')
+    setNewHabitType('boolean'); setNewTargetCount('1'); setNewEffort('medium')
     setShowAdd(false); setSaving(false)
     await loadHabits()
   }
@@ -507,6 +515,7 @@ export default function HabitsPage() {
     setEditWeekDays(habit.weekDays.length ? habit.weekDays : [1, 2, 3, 4, 5])
     setEditTime(habit.scheduledTime); setEditWhy(habit.why)
     setEditHabitType(habit.habitType); setEditTargetCount(String(habit.targetCount))
+    setEditEffort(habit.effort ?? 'medium')
     setEditId(null)
   }
 
@@ -518,12 +527,13 @@ export default function HabitsPage() {
       frequency: editFreq, weekDays: editFreq === 'weekly' ? editWeekDays : [],
       scheduledTime: editTime, why: editWhy.trim(),
       habitType: editHabitType, targetCount: editHabitType === 'count' ? parseInt(editTargetCount) || 1 : 1,
+      effort: editEffort,
     })
     setHabits(prev => prev.map(h => h.id === editingHabit.id ? {
       ...h, name: editName.trim(), emoji: editEmoji || '🎯',
       priority: editPriority, isCoreHabit: editIsCore,
       frequency: editFreq, weekDays: editFreq === 'weekly' ? editWeekDays : [],
-      scheduledTime: editTime, why: editWhy.trim(),
+      scheduledTime: editTime, why: editWhy.trim(), effort: editEffort,
     } : h))
     setEditingHabit(null)
   }
@@ -564,55 +574,6 @@ export default function HabitsPage() {
     setAiSortLoading(false)
   }
 
-  async function loadBadHabitLogs() {
-    if (!user) return
-    const docs = await queryDocuments('bad_habit_logs', [
-      where('userId', '==', user.uid), orderBy('timestamp', 'desc'),
-    ])
-    setBadHabitLogs(docs)
-  }
-
-  async function saveBadHabit() {
-    if (!user || !badHabitName.trim()) return
-    setSavingBadHabit(true)
-    const doc = {
-      userId: user.uid,
-      date: today,
-      timestamp: new Date().toISOString(),
-      badHabitName: badHabitName.trim(),
-      cue: badHabitCue.trim(),
-      trigger: badHabitTrigger.trim(),
-      thoughts: badHabitThoughts.trim(),
-      intensity: badHabitIntensity,
-    }
-    await addDocument('bad_habit_logs', doc)
-    setBadHabitLogs(prev => [{ id: Date.now().toString(), ...doc }, ...prev])
-    setBadHabitName(''); setBadHabitCue(''); setBadHabitTrigger(''); setBadHabitThoughts(''); setBadHabitIntensity(3)
-    setSavingBadHabit(false)
-  }
-
-  async function analyzeBadHabits() {
-    if (!user || badHabitLogs.length === 0) return
-    setBadHabitAiLoading(true)
-    try {
-      const sample = badHabitLogs.slice(0, 20).map(l => ({
-        name: l.badHabitName, cue: l.cue, trigger: l.trigger, thoughts: l.thoughts, intensity: l.intensity, date: l.date,
-      }))
-      const res = await fetch('/api/ai/insight', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'bad-habits',
-          userId: user.uid,
-          data: `Analyze these ${sample.length} bad habit log entries. Identify: 1) the top 2 recurring triggers or cues, 2) a pattern in timing or thoughts, 3) one concrete replacement habit or coping strategy. Be direct and specific — reference actual entries.\n\nData: ${JSON.stringify(sample)}`,
-        }),
-      })
-      const resData = await res.json()
-      setBadHabitAiAnalysis(resData.insight ?? '')
-    } catch { setBadHabitAiAnalysis('Could not generate analysis — try again.') }
-    setBadHabitAiLoading(false)
-  }
-
   const activeLogs = viewDate === today ? todayLogs : viewLogs
   const doneCount = activeLogs.size
   const totalHabits = habits.length
@@ -645,153 +606,6 @@ export default function HabitsPage() {
   return (
     <div className="pb-4 space-y-4 animate-fade-in">
 
-      {/* ─── Page-level tab switcher ─── */}
-      <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--surface-2)' }}>
-        {([['habits', '✅ Habits'], ['bad-habits', '⚠️ Cravings']] as const).map(([key, label]) => (
-          <button key={key} onClick={() => { setPageTab(key); if (key === 'bad-habits' && badHabitLogs.length === 0) loadBadHabitLogs() }}
-            className="flex-1 py-2 rounded-lg text-xs font-medium transition-all"
-            style={{
-              background: pageTab === key ? 'var(--background)' : 'transparent',
-              color: pageTab === key ? (key === 'bad-habits' ? '#ef4444' : '#14b8a6') : 'var(--muted)',
-              boxShadow: pageTab === key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            }}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* ─── Bad Habits Tracker ─── */}
-      {pageTab === 'bad-habits' && (
-        <div className="space-y-4">
-          {/* Log form */}
-          <div className="card space-y-3" style={{ border: '1px solid rgba(239,68,68,0.2)' }}>
-            <h3 className="font-semibold text-sm" style={{ color: '#ef4444' }}>⚠️ Log a Craving or Slip</h3>
-            <p className="text-xs text-muted">Record what triggered it while it&apos;s fresh — this is how patterns surface.</p>
-
-            {/* Preset chips */}
-            <div>
-              <p className="text-[10px] text-muted uppercase mb-1.5 font-semibold">What happened?</p>
-              <div className="flex flex-wrap gap-1.5">
-                {BAD_HABIT_PRESETS.map(p => (
-                  <button key={p} onClick={() => setBadHabitName(p)}
-                    className="px-2.5 py-1 rounded-full text-xs font-medium"
-                    style={{
-                      background: badHabitName === p ? 'rgba(239,68,68,0.15)' : 'var(--surface-2)',
-                      border: badHabitName === p ? '1px solid #ef4444' : '1px solid var(--border)',
-                      color: badHabitName === p ? '#ef4444' : 'var(--muted)',
-                    }}>
-                    {p}
-                  </button>
-                ))}
-              </div>
-              <input type="text" value={badHabitName} onChange={e => setBadHabitName(e.target.value)}
-                placeholder="Or describe it…"
-                className="mt-2 w-full px-3 py-2 rounded-xl text-sm outline-none"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-            </div>
-
-            <div className="grid grid-cols-1 gap-2">
-              <input type="text" value={badHabitCue} onChange={e => setBadHabitCue(e.target.value)}
-                placeholder="Cue / situation (e.g. 'Bored at 11pm')"
-                className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-              <input type="text" value={badHabitTrigger} onChange={e => setBadHabitTrigger(e.target.value)}
-                placeholder="Trigger / what caused it (e.g. 'Stressed about work')"
-                className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-              <textarea value={badHabitThoughts} onChange={e => setBadHabitThoughts(e.target.value)}
-                placeholder="Thoughts at the time…"
-                rows={2}
-                className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-            </div>
-
-            <div>
-              <p className="text-[10px] text-muted uppercase mb-1.5 font-semibold">Intensity</p>
-              <div className="flex gap-2">
-                {[1, 2, 3, 4, 5].map(n => (
-                  <button key={n} onClick={() => setBadHabitIntensity(n)}
-                    className="flex-1 py-1.5 rounded-lg text-xs font-bold"
-                    style={{
-                      background: badHabitIntensity === n ? 'rgba(239,68,68,0.15)' : 'var(--surface-2)',
-                      border: badHabitIntensity === n ? '1px solid #ef4444' : '1px solid var(--border)',
-                      color: badHabitIntensity === n ? '#ef4444' : 'var(--muted)',
-                    }}>
-                    {n}
-                  </button>
-                ))}
-              </div>
-              <div className="flex justify-between mt-0.5">
-                <span className="text-[9px] text-muted">Mild urge</span>
-                <span className="text-[9px] text-muted">Gave in fully</span>
-              </div>
-            </div>
-
-            <button onClick={saveBadHabit} disabled={!badHabitName.trim() || savingBadHabit}
-              className="w-full py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
-              style={{ background: '#ef4444', color: 'white' }}>
-              {savingBadHabit ? 'Saving…' : 'Log it'}
-            </button>
-          </div>
-
-          {/* AI Analysis */}
-          {badHabitLogs.length >= 3 && (
-            <div className="card space-y-2" style={{ border: '1px solid rgba(168,85,247,0.2)' }}>
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">🧠 What triggers me?</h3>
-                <button onClick={analyzeBadHabits} disabled={badHabitAiLoading}
-                  className="text-[10px] px-2.5 py-1 rounded-lg disabled:opacity-40"
-                  style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
-                  {badHabitAiLoading ? '⏳' : 'Analyse'}
-                </button>
-              </div>
-              {badHabitAiAnalysis && (
-                <p className="text-sm leading-relaxed">{badHabitAiAnalysis}</p>
-              )}
-              {!badHabitAiAnalysis && !badHabitAiLoading && (
-                <p className="text-xs text-muted">Tap Analyse to find patterns in your {badHabitLogs.length} entries.</p>
-              )}
-            </div>
-          )}
-
-          {/* Past logs */}
-          {badHabitLogs.length > 0 && (
-            <div className="card">
-              <h3 className="font-semibold text-sm mb-3">📋 Recent entries ({badHabitLogs.length})</h3>
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {badHabitLogs.slice(0, 20).map((log, i) => (
-                  <div key={log.id ?? i} className="px-3 py-2.5 rounded-xl space-y-1"
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium" style={{ color: '#ef4444' }}>{log.badHabitName}</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-muted">{log.date}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
-                          style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
-                          {log.intensity}/5
-                        </span>
-                      </div>
-                    </div>
-                    {log.cue && <p className="text-xs text-muted">📍 {log.cue}</p>}
-                    {log.trigger && <p className="text-xs text-muted">⚡ {log.trigger}</p>}
-                    {log.thoughts && <p className="text-xs text-muted italic">&ldquo;{log.thoughts}&rdquo;</p>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {badHabitLogs.length === 0 && (
-            <div className="text-center py-8 space-y-2">
-              <p className="text-3xl">🧘</p>
-              <p className="text-sm font-medium">No entries yet</p>
-              <p className="text-xs text-muted">Log cravings or slips above — patterns will emerge.</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {pageTab === 'habits' && <>
       {/* ─── Stats bar ─── */}
       <div className="grid grid-cols-4 gap-2">
         <div className="card-sm text-center">
@@ -878,6 +692,7 @@ export default function HabitsPage() {
           why={newWhy} setWhy={setNewWhy}
           habitType={newHabitType} setHabitType={setNewHabitType}
           targetCount={newTargetCount} setTargetCount={setNewTargetCount}
+          effort={newEffort} setEffort={setNewEffort}
           aiLoading={aiEmojiLoading}
           onSuggestEmoji={() => fetchSuggestedEmoji(newName, false)}
           onSave={saveHabit} onCancel={() => setShowAdd(false)} saving={saving}
@@ -897,7 +712,7 @@ export default function HabitsPage() {
           <p className="text-sm text-muted">No habits yet. Add your first!</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {displayHabits.map(habit => {
             const done = activeLogs.has(habit.id)
             const atRisk = habit.currentStreak > 0 && !done && viewDate === today
@@ -908,10 +723,14 @@ export default function HabitsPage() {
             const isCountHabit = habit.habitType === 'count'
             const countPct    = isCountHabit ? Math.min((habit.todayCount / habit.targetCount) * 100, 100) : 0
 
+            const effortColor = habit.effort === 'small' ? '#22c55e' : habit.effort === 'large' ? '#ef4444' : '#f59e0b'
+            const effortLabel = habit.effort === 'small' ? 'S' : habit.effort === 'large' ? 'L' : 'M'
+
             return (
               <div key={habit.id} className="card"
                 style={{
-                  border: done ? '1px solid rgba(34,197,94,0.35)' : atRisk ? '1px solid rgba(245,158,11,0.35)' : '1px solid var(--border)',
+                  border: done ? '1px solid rgba(34,197,94,0.4)' : atRisk ? '1px solid rgba(245,158,11,0.35)' : '1px solid var(--border)',
+                  background: done ? 'rgba(34,197,94,0.05)' : 'var(--surface)',
                 }}>
 
                 {/* ── Main row ── */}
@@ -937,8 +756,14 @@ export default function HabitsPage() {
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-base">{habit.emoji}</span>
                       <span className="font-semibold text-sm"
-                        style={{ textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--muted)' : 'var(--foreground)' }}>
+                        style={{ color: done ? 'var(--muted)' : 'var(--foreground)' }}>
                         {habit.name}
+                      </span>
+                      {done && <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+                        style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>done ✓</span>}
+                      <span className="text-[9px] w-4 h-4 rounded flex items-center justify-center font-bold ml-auto flex-shrink-0"
+                        style={{ background: `rgba(${effortColor === '#22c55e' ? '34,197,94' : effortColor === '#ef4444' ? '239,68,68' : '245,158,11'},0.15)`, color: effortColor }}>
+                        {effortLabel}
                       </span>
                       {habit.isCoreHabit && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-full"
@@ -946,7 +771,7 @@ export default function HabitsPage() {
                       )}
                       {isConsistent && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-full"
-                          style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e' }}>consistent ✓</span>
+                          style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e' }}>✓ consistent</span>
                       )}
                     </div>
 
@@ -1061,6 +886,7 @@ export default function HabitsPage() {
                       why={editWhy} setWhy={setEditWhy}
                       habitType={editHabitType} setHabitType={setEditHabitType}
                       targetCount={editTargetCount} setTargetCount={setEditTargetCount}
+                      effort={editEffort} setEffort={setEditEffort}
                       aiLoading={editAiLoading}
                       onSuggestEmoji={() => fetchSuggestedEmoji(editName, true)}
                       onSave={saveEdit} onCancel={() => setEditingHabit(null)} saving={false}
@@ -1072,7 +898,6 @@ export default function HabitsPage() {
           })}
         </div>
       )}
-      </>}
     </div>
   )
 }
