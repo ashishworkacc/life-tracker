@@ -295,11 +295,11 @@ DATA: ${JSON.stringify(last14)}`,
           )}
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <Link href="/health/import" style={{ fontSize: '0.75rem', padding: '0.4rem 0.85rem', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 8, textDecoration: 'none', fontWeight: 700 }}>
+            📥 Import ZIP
+          </Link>
           <Link href="/trackers/food" style={{ fontSize: '0.75rem', padding: '0.4rem 0.85rem', background: 'rgba(20,184,166,0.1)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.25)', borderRadius: 8, textDecoration: 'none', fontWeight: 600 }}>
             🥗 Food
-          </Link>
-          <Link href="/trackers/sleep" style={{ fontSize: '0.75rem', padding: '0.4rem 0.85rem', background: 'rgba(99,102,241,0.1)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, textDecoration: 'none', fontWeight: 600 }}>
-            💤 Sleep
           </Link>
         </div>
       </div>
