@@ -5,16 +5,20 @@ import { checkRateLimit, rateLimitResponse } from '@/lib/ai/rateLimit'
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, context, userId } = await req.json()
+    const { messages, context, userId, systemPrefix } = await req.json()
     if (!messages?.length) return NextResponse.json({ error: 'No messages' }, { status: 400 })
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { allowed } = checkRateLimit(userId)
     if (!allowed) return rateLimitResponse()
 
-    const systemPrompt = context
+    const basePrompt = context
       ? `${SYSTEM_PROMPTS.chatAssistant}\n\nUser context:\n${context}`
       : SYSTEM_PROMPTS.chatAssistant
+
+    const systemPrompt = systemPrefix
+      ? `${basePrompt}\n\n${systemPrefix}`
+      : basePrompt
 
     // Stream response
     const encoder = new TextEncoder()

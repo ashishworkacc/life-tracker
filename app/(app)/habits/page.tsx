@@ -24,6 +24,10 @@ interface Habit {
   targetCount: number
   todayCount: number  // for count-based habits
   effort: 'small' | 'medium' | 'large'
+  hypothesis?: string           // experiment hypothesis
+  hypothesisStartDate?: string  // when experiment started
+  hypothesisEvalDays?: number   // evaluate after N days (default 21)
+  difficultyRating?: number     // last difficulty rating 1-5
 }
 
 const TIME_OPTS = ['morning', 'afternoon', 'evening', 'anytime'] as const
@@ -56,6 +60,8 @@ interface HabitFormProps {
   habitType: 'boolean' | 'count'; setHabitType: (v: 'boolean' | 'count') => void
   targetCount: string; setTargetCount: (v: string) => void
   effort: 'small' | 'medium' | 'large'; setEffort: (v: 'small' | 'medium' | 'large') => void
+  hypothesis: string; setHypothesis: (v: string) => void
+  hypothesisEvalDays: string; setHypothesisEvalDays: (v: string) => void
   aiLoading: boolean
   onSuggestEmoji: () => void
   onSave: () => void; onCancel: () => void; saving: boolean
@@ -65,8 +71,10 @@ function HabitForm({
   isEdit, name, setName, emoji, setEmoji, priority, setPriority,
   isCore, setIsCore, freq, setFreq, weekDays, setWeekDays,
   time, setTime, why, setWhy, habitType, setHabitType, targetCount, setTargetCount,
-  effort, setEffort, aiLoading, onSuggestEmoji, onSave, onCancel, saving,
+  effort, setEffort, hypothesis, setHypothesis, hypothesisEvalDays, setHypothesisEvalDays,
+  aiLoading, onSuggestEmoji, onSave, onCancel, saving,
 }: HabitFormProps) {
+  const [showExperiment, setShowExperiment] = useState(!!hypothesis)
   return (
     <div className="card space-y-3">
       <h3 className="font-semibold text-sm">{isEdit ? '✏️ Edit Habit' : '✨ New Habit'}</h3>
@@ -233,6 +241,39 @@ function HabitForm({
         Core habit (shown in Burnout Mode)
       </button>
 
+      {/* Experiment mode */}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
+        <button onClick={() => setShowExperiment(p => !p)}
+          className="flex items-center gap-2 text-sm w-full"
+          style={{ color: showExperiment ? '#3b82f6' : 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+          <span className="w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0"
+            style={{ background: showExperiment ? '#3b82f6' : 'var(--surface-2)', border: `1px solid ${showExperiment ? '#3b82f6' : 'var(--border)'}`, color: 'white' }}>
+            {showExperiment ? '✓' : ''}
+          </span>
+          <span>🔬 Run as Experiment <span style={{ fontSize: '0.72rem', opacity: 0.7 }}>(Scientific method — set a hypothesis)</span></span>
+        </button>
+        {showExperiment && (
+          <div className="mt-2 space-y-2">
+            <div>
+              <label className="text-xs text-muted mb-1 block">Hypothesis — what do you expect to happen?</label>
+              <textarea value={hypothesis} onChange={e => setHypothesis(e.target.value)}
+                placeholder={`e.g. "I believe meditating 10 min/day will reduce my anxiety by 30% in 21 days"`}
+                rows={2}
+                className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
+                style={{ background: 'var(--surface-2)', border: '1px solid rgba(59,130,246,0.4)', color: 'var(--foreground)' }} />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted">Evaluate after</label>
+              <input type="number" value={hypothesisEvalDays} onChange={e => setHypothesisEvalDays(e.target.value)}
+                min="7" max="90" placeholder="21"
+                className="w-16 px-2 py-1 rounded-lg text-sm outline-none text-center"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
+              <label className="text-xs text-muted">days</label>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel}
           className="flex-1 py-2.5 rounded-xl text-sm"
@@ -272,6 +313,8 @@ export default function HabitsPage() {
   const [newHabitType, setNewHabitType] = useState<'boolean' | 'count'>('boolean')
   const [newTargetCount, setNewTargetCount] = useState('1')
   const [newEffort, setNewEffort] = useState<'small' | 'medium' | 'large'>('medium')
+  const [newHypothesis, setNewHypothesis] = useState('')
+  const [newHypothesisEvalDays, setNewHypothesisEvalDays] = useState('21')
   const [saving, setSaving] = useState(false)
   const [aiEmojiLoading, setAiEmojiLoading] = useState(false)
 
@@ -288,6 +331,8 @@ export default function HabitsPage() {
   const [editHabitType, setEditHabitType] = useState<'boolean' | 'count'>('boolean')
   const [editTargetCount, setEditTargetCount] = useState('1')
   const [editEffort, setEditEffort] = useState<'small' | 'medium' | 'large'>('medium')
+  const [editHypothesis, setEditHypothesis] = useState('')
+  const [editHypothesisEvalDays, setEditHypothesisEvalDays] = useState('21')
   const [editAiLoading, setEditAiLoading] = useState(false)
 
   const emojiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -404,6 +449,10 @@ export default function HabitsPage() {
           targetCount: h.targetCount ?? 1,
           todayCount: todayLogForHabit?.countValue ?? 0,
           effort: (h.effort ?? 'medium') as 'small' | 'medium' | 'large',
+          hypothesis: h.hypothesis ?? undefined,
+          hypothesisStartDate: h.hypothesisStartDate ?? undefined,
+          hypothesisEvalDays: h.hypothesisEvalDays ?? undefined,
+          difficultyRating: h.difficultyRating ?? undefined,
         }
       }))
     } catch (err) {
@@ -500,10 +549,11 @@ export default function HabitsPage() {
       scheduledTime: newTime, why: newWhy.trim(), bestStreak: 0,
       habitType: newHabitType, targetCount: newHabitType === 'count' ? parseInt(newTargetCount) || 1 : 1,
       effort: newEffort,
+      ...(newHypothesis.trim() ? { hypothesis: newHypothesis.trim(), hypothesisStartDate: today, hypothesisEvalDays: parseInt(newHypothesisEvalDays) || 21 } : {}),
     })
     setNewName(''); setNewEmoji(''); setNewPriority(2); setNewIsCore(false)
     setNewFreq('daily'); setNewWeekDays([1, 2, 3, 4, 5]); setNewTime('anytime'); setNewWhy('')
-    setNewHabitType('boolean'); setNewTargetCount('1'); setNewEffort('medium')
+    setNewHabitType('boolean'); setNewTargetCount('1'); setNewEffort('medium'); setNewHypothesis(''); setNewHypothesisEvalDays('21')
     setShowAdd(false); setSaving(false)
     await loadHabits()
   }
@@ -516,6 +566,8 @@ export default function HabitsPage() {
     setEditTime(habit.scheduledTime); setEditWhy(habit.why)
     setEditHabitType(habit.habitType); setEditTargetCount(String(habit.targetCount))
     setEditEffort(habit.effort ?? 'medium')
+    setEditHypothesis(habit.hypothesis ?? '')
+    setEditHypothesisEvalDays(String(habit.hypothesisEvalDays ?? 21))
     setEditId(null)
   }
 
@@ -528,6 +580,9 @@ export default function HabitsPage() {
       scheduledTime: editTime, why: editWhy.trim(),
       habitType: editHabitType, targetCount: editHabitType === 'count' ? parseInt(editTargetCount) || 1 : 1,
       effort: editEffort,
+      hypothesis: editHypothesis.trim() || null,
+      hypothesisEvalDays: editHypothesis.trim() ? parseInt(editHypothesisEvalDays) || 21 : null,
+      ...(editHypothesis.trim() && !editingHabit.hypothesis ? { hypothesisStartDate: today } : {}),
     })
     setHabits(prev => prev.map(h => h.id === editingHabit.id ? {
       ...h, name: editName.trim(), emoji: editEmoji || '🎯',
@@ -693,6 +748,8 @@ export default function HabitsPage() {
           habitType={newHabitType} setHabitType={setNewHabitType}
           targetCount={newTargetCount} setTargetCount={setNewTargetCount}
           effort={newEffort} setEffort={setNewEffort}
+          hypothesis={newHypothesis} setHypothesis={setNewHypothesis}
+          hypothesisEvalDays={newHypothesisEvalDays} setHypothesisEvalDays={setNewHypothesisEvalDays}
           aiLoading={aiEmojiLoading}
           onSuggestEmoji={() => fetchSuggestedEmoji(newName, false)}
           onSave={saveHabit} onCancel={() => setShowAdd(false)} saving={saving}
@@ -795,6 +852,21 @@ export default function HabitsPage() {
                         💡 {habit.why}
                       </p>
                     )}
+                    {habit.hypothesis && (() => {
+                      const startDate = habit.hypothesisStartDate ? new Date(habit.hypothesisStartDate) : null
+                      const daysSince = startDate ? Math.floor((Date.now() - startDate.getTime()) / 86400000) : 0
+                      const evalDays = habit.hypothesisEvalDays ?? 21
+                      const isReady = daysSince >= evalDays
+                      return (
+                        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+                            style={{ background: isReady ? 'rgba(59,130,246,0.2)' : 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)' }}>
+                            🔬 {isReady ? `Experiment ready (${daysSince}d)` : `Experiment: Day ${daysSince}/${evalDays}`}
+                          </span>
+                          <span className="text-[9px] text-muted italic truncate" style={{ maxWidth: 160 }}>{habit.hypothesis}</span>
+                        </div>
+                      )
+                    })()}
                     {isCountHabit && (
                       <div className="mt-1.5">
                         <div className="flex items-center justify-between mb-0.5">
@@ -887,6 +959,8 @@ export default function HabitsPage() {
                       habitType={editHabitType} setHabitType={setEditHabitType}
                       targetCount={editTargetCount} setTargetCount={setEditTargetCount}
                       effort={editEffort} setEffort={setEditEffort}
+                      hypothesis={editHypothesis} setHypothesis={setEditHypothesis}
+                      hypothesisEvalDays={editHypothesisEvalDays} setHypothesisEvalDays={setEditHypothesisEvalDays}
                       aiLoading={editAiLoading}
                       onSuggestEmoji={() => fetchSuggestedEmoji(editName, true)}
                       onSave={saveEdit} onCancel={() => setEditingHabit(null)} saving={false}

@@ -106,6 +106,7 @@ export default function CommandCenterPage() {
   const [aiBrief, setAiBrief]   = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiLoaded, setAiLoaded] = useState(false)
+  const [briefRating, setBriefRating] = useState<'up' | 'down' | null>(null)
   const [quickThought, setQuickThought] = useState('')
   const [savingThought, setSavingThought] = useState(false)
   const [userThoughts, setUserThoughts] = useState<string[]>([])
@@ -352,22 +353,39 @@ export default function CommandCenterPage() {
     setSavingThought(false)
   }
 
+  async function rateAiBrief(rating: 'up' | 'down') {
+    if (!user || !aiBrief) return
+    setBriefRating(rating)
+    try {
+      await addDocument('ai_signals', {
+        userId: user.uid,
+        date,
+        type: 'coach_brief',
+        rating,
+        content: aiBrief.slice(0, 200),
+        timestamp: new Date().toISOString(),
+      })
+    } catch { /* ignore */ }
+  }
+
   async function loadAiBrief() {
     if (!user || aiLoading) return
     setAiLoading(true)
     // Clear cache so a fresh call is made
     try { localStorage.removeItem('ai_brief_cache') } catch { /* ignore */ }
     try {
-      const [completedToday, recentThoughts] = await Promise.all([
+      const [completedToday, recentThoughts, lifeOSDocs] = await Promise.all([
         queryDocuments('todos', [
           where('userId', '==', user.uid), where('completed', '==', true), where('completedAt', '>=', date),
         ]),
         queryDocuments('activity_logs', [
           where('userId', '==', user.uid), where('date', '==', date), where('activityTag', '==', 'thought'),
         ]),
+        queryDocuments('life_os', [where('userId', '==', user.uid)]),
       ])
       const thoughtTexts = recentThoughts.map(l => l.text as string).filter(Boolean).slice(0, 5)
       setUserThoughts(thoughtTexts)
+      const lifeOS = lifeOSDocs.length > 0 ? (lifeOSDocs[0] as any) : null
 
       // Build last-3-day habit completion rates for trend
       const last3DayRates: number[] = habitDots.slice(-3).map(d =>
@@ -397,6 +415,8 @@ export default function CommandCenterPage() {
           xpToday, todoStats, atRiskHabits, last3DayRates, activeGoalTitles,
           topCounters: topCounters.map(c => ({ name: c.name, currentCount: c.currentCount, targetCount: c.targetCount })),
           userThoughts: thoughtTexts,
+          userId: user.uid,
+          lifeOS: lifeOS ? { mission: lifeOS.mission, values: lifeOS.values, challenges: lifeOS.challenges, strategies: lifeOS.strategies } : null,
         }),
       })
       const data = await res.json()
@@ -632,7 +652,24 @@ export default function CommandCenterPage() {
                 <span className="text-xs text-muted ml-1">Analysing your data…</span>
               </div>
             ) : aiLoaded ? (
-              <p className="text-sm leading-relaxed">{aiBrief}</p>
+              <>
+                <p className="text-sm leading-relaxed">{aiBrief}</p>
+                {/* Signal system */}
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-[10px] text-muted">Was this helpful?</span>
+                  <button onClick={() => rateAiBrief('up')}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px]"
+                    style={{ background: briefRating === 'up' ? 'rgba(34,197,94,0.2)' : 'var(--surface-2)', border: `1px solid ${briefRating === 'up' ? '#22c55e' : 'var(--border)'}`, color: briefRating === 'up' ? '#22c55e' : 'var(--muted)' }}>
+                    👍
+                  </button>
+                  <button onClick={() => rateAiBrief('down')}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px]"
+                    style={{ background: briefRating === 'down' ? 'rgba(239,68,68,0.2)' : 'var(--surface-2)', border: `1px solid ${briefRating === 'down' ? '#ef4444' : 'var(--border)'}`, color: briefRating === 'down' ? '#ef4444' : 'var(--muted)' }}>
+                    👎
+                  </button>
+                  {briefRating && <span className="text-[10px] text-muted">{briefRating === 'up' ? 'Thanks! Signals noted.' : 'Got it — improving next time.'}</span>}
+                </div>
+              </>
             ) : (
               <p className="text-xs text-muted">Loading insights…</p>
             )}

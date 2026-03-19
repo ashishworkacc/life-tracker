@@ -46,7 +46,7 @@ function formatDate(dateStr: string) {
 export default function JournalPage() {
   const { user } = useAuth()
   const today = todayDate()
-  const [tab, setTab] = useState<'reflections' | 'lifelog' | 'summaries'>('reflections')
+  const [tab, setTab] = useState<'reflections' | 'lifelog' | 'summaries' | 'weekly-review'>('reflections')
 
   // Reflections
   const [reflections, setReflections] = useState<Reflection[]>([])
@@ -86,6 +86,102 @@ export default function JournalPage() {
     if (!user || tab !== 'summaries') return
     if (summaries.length === 0) loadSummaries()
   }, [tab, user])
+
+  // Weekly review state
+  const [weekReview, setWeekReview] = useState('')
+  const [weekReviewLoading, setWeekReviewLoading] = useState(false)
+  const [weekReviewError, setWeekReviewError] = useState('')
+  const [savedWeeklyReviews, setSavedWeeklyReviews] = useState<{id:string;weekLabel:string;content:string;createdAt:string}[]>([])
+  const [loadingWeeklyHistory, setLoadingWeeklyHistory] = useState(false)
+
+  useEffect(() => {
+    if (!user || tab !== 'weekly-review') return
+    if (savedWeeklyReviews.length === 0) loadWeeklyReviews()
+  }, [tab, user])
+
+  async function loadWeeklyReviews() {
+    if (!user) return
+    setLoadingWeeklyHistory(true)
+    try {
+      const { queryDocuments: qd, where: w, orderBy: ob, limit: lim } = await import('@/lib/firebase/db')
+      const docs = await qd('weekly_reviews', [w('userId', '==', user.uid), ob('createdAt', 'desc'), lim(10)])
+      setSavedWeeklyReviews(docs.map(d => ({ id: d.id, weekLabel: d.weekLabel ?? '', content: d.content ?? '', createdAt: d.createdAt ?? '' })))
+    } catch { /* ignore */ }
+    setLoadingWeeklyHistory(false)
+  }
+
+  async function generateWeeklyReview() {
+    if (!user || weekReviewLoading) return
+    setWeekReviewLoading(true)
+    setWeekReviewError('')
+    try {
+      const { queryDocuments: qd, where: w, orderBy: ob } = await import('@/lib/firebase/db')
+      // Build last 7 dates
+      const dates: string[] = []
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i)
+        dates.push(d.toISOString().split('T')[0])
+      }
+      const startDate = dates[0]
+
+      const [habitLogsAll, todosAll, goalsAll, xpEventsAll, reflectionsAll, lifeOSDocs] = await Promise.all([
+        qd('daily_habit_logs', [w('userId', '==', user.uid), w('date', '>=', startDate)]),
+        qd('todos', [w('userId', '==', user.uid)]),
+        qd('goals', [w('userId', '==', user.uid), w('status', '==', 'active')]),
+        qd('xp_events', [w('userId', '==', user.uid), w('date', '>=', startDate)]),
+        qd('daily_reflections', [w('userId', '==', user.uid), w('date', '>=', startDate)]),
+        qd('life_os', [w('userId', '==', user.uid)]),
+      ])
+
+      // Build habit summaries (completedDays / 7)
+      const habitsMap: Record<string, {name:string;effort:string;completedDays:number;totalDays:number}> = {}
+      for (const log of habitLogsAll) {
+        if (!log.completed) continue
+        const id = log.habitId as string
+        if (!habitsMap[id]) habitsMap[id] = { name: log.habitName as string ?? id, effort: log.effort as string ?? 'medium', completedDays: 0, totalDays: 7 }
+        habitsMap[id].completedDays++
+      }
+
+      const todosData = (todosAll as any[]).map(t => ({ title: t.title, completed: t.completed ?? false, priority: t.priority ?? 'p2' }))
+      const xpTotal = (xpEventsAll as any[]).reduce((s, e) => s + (e.xpEarned ?? 0), 0)
+      const lifeOS = lifeOSDocs.length > 0 ? lifeOSDocs[0] as any : null
+
+      // avg mood from reflections
+      const moodsFromLogs = (reflectionsAll as any[]).map(r => r.mood).filter(Boolean)
+      const moodAvg = moodsFromLogs.length ? moodsFromLogs.reduce((a:number,b:number)=>a+b,0)/moodsFromLogs.length : null
+
+      const res = await fetch('/api/ai/weekly-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          weekDates: dates,
+          habitsData: Object.values(habitsMap),
+          todosData,
+          goalsData: (goalsAll as any[]).map(g => ({ title: g.title, category: g.category, progress: g.currentValue, target: g.targetValue })),
+          xpEarned: xpTotal,
+          moodAvg,
+          lifeOS: lifeOS ? { mission: lifeOS.mission, values: lifeOS.values, beliefs: lifeOS.beliefs, strategies: lifeOS.strategies, challenges: lifeOS.challenges } : null,
+        }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setWeekReview(data.review ?? '')
+    } catch (e: any) {
+      setWeekReviewError(e.message ?? 'Failed to generate review')
+    }
+    setWeekReviewLoading(false)
+  }
+
+  async function saveWeeklyReview() {
+    if (!user || !weekReview.trim()) return
+    const { addDocument: ad } = await import('@/lib/firebase/db')
+    const d = new Date()
+    const weekLabel = `Week of ${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
+    const doc = await ad('weekly_reviews', { userId: user.uid, weekLabel, content: weekReview, createdAt: new Date().toISOString() })
+    if (doc?.id) setSavedWeeklyReviews(prev => [{ id: doc.id!, weekLabel, content: weekReview, createdAt: new Date().toISOString() }, ...prev])
+    setWeekReview('')
+  }
 
   async function loadReflections() {
     if (!user) return
@@ -355,12 +451,12 @@ export default function JournalPage() {
   return (
     <div className="pb-4 space-y-4 animate-fade-in">
       {/* Tab switcher */}
-      <div className="flex rounded-xl p-1" style={{ background: 'var(--surface)' }}>
-        {(['reflections', 'lifelog', 'summaries'] as const).map(t => (
+      <div className="grid grid-cols-4 rounded-xl p-1 gap-0.5" style={{ background: 'var(--surface)' }}>
+        {(['reflections', 'lifelog', 'summaries', 'weekly-review'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className="flex-1 py-2 rounded-lg text-xs font-medium transition-colors"
+            className="py-2 rounded-lg text-[11px] font-medium transition-colors"
             style={{ background: tab === t ? '#14b8a6' : 'transparent', color: tab === t ? 'white' : 'var(--muted)' }}>
-            {t === 'reflections' ? '✍️ Reflect' : t === 'lifelog' ? '📍 Life Log' : '📋 Summaries'}
+            {t === 'reflections' ? '✍️ Reflect' : t === 'lifelog' ? '📍 Log' : t === 'summaries' ? '📋 Day' : '📊 Week'}
           </button>
         ))}
       </div>
@@ -478,6 +574,56 @@ export default function JournalPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* ─── Weekly Review Tab ─── */}
+      {tab === 'weekly-review' && (
+        <div className="space-y-4">
+          <div className="card space-y-3" style={{ border: '1px solid rgba(139,92,246,0.2)' }}>
+            <div>
+              <h3 className="font-semibold text-sm" style={{ color: '#8b5cf6' }}>📊 PAI Weekly Review</h3>
+              <p className="text-xs text-muted mt-0.5">AI analyses your last 7 days — habits, todos, goals, XP, mood — and generates a structured review aligned with your Life OS mission.</p>
+            </div>
+            {weekReviewError && <p className="text-xs" style={{ color: '#ef4444' }}>{weekReviewError}</p>}
+            {!weekReview ? (
+              <button onClick={generateWeeklyReview} disabled={weekReviewLoading}
+                className="w-full py-3 rounded-xl text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', color: 'white' }}>
+                {weekReviewLoading ? <><span className="animate-spin">⏳</span> Analysing your week…</> : '✨ Generate Weekly Review'}
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-xl p-3 text-sm leading-relaxed whitespace-pre-wrap"
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: '0.82rem', lineHeight: 1.7 }}>
+                  {weekReview}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setWeekReview('')}
+                    className="flex-1 py-2 rounded-xl text-xs"
+                    style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>Discard</button>
+                  <button onClick={saveWeeklyReview}
+                    className="flex-1 py-2 rounded-xl text-xs font-semibold"
+                    style={{ background: '#8b5cf6', color: 'white' }}>💾 Save Review</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Saved reviews history */}
+          {loadingWeeklyHistory ? (
+            <div className="text-center py-4"><p className="text-sm text-muted">Loading…</p></div>
+          ) : savedWeeklyReviews.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold text-muted uppercase">Past Reviews ({savedWeeklyReviews.length})</h3>
+              {savedWeeklyReviews.map(r => (
+                <div key={r.id} className="card space-y-2">
+                  <p className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>📅 {r.weekLabel}</p>
+                  <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap">{r.content.slice(0, 300)}{r.content.length > 300 ? '…' : ''}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* ─── Day Summaries Tab ─── */}

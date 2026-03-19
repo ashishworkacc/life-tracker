@@ -36,6 +36,7 @@ const NAV_SECTIONS = [
   {
     label: 'More',
     items: [
+      { href: '/life-os',  icon: '🧬', label: 'Life OS' },
       { href: '/settings', icon: '⚙️', label: 'Settings' },
     ],
   },

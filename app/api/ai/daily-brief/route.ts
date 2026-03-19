@@ -7,6 +7,7 @@ export async function POST(req: NextRequest) {
       habits, todos, sleep, focusSessions, timeOfDay, date, dayOfWeek,
       weeklyHabitPct, xpLevel, xpToday, todoStats, topCounters,
       atRiskHabits, last3DayRates, activeGoalTitles, userThoughts,
+      userId, lifeOS,
     } = await req.json()
 
     const habitsDone = habits?.done ?? 0
@@ -64,7 +65,17 @@ export async function POST(req: NextRequest) {
     ]
     const angle = angles[Math.floor(Math.random() * angles.length)]
 
+    const lifeOSContext = lifeOS ? `
+IDENTITY CONTEXT (use this to personalise coaching):
+${lifeOS.mission ? `Mission: "${lifeOS.mission}"` : ''}
+${lifeOS.values?.length ? `Core Values: ${lifeOS.values.join(', ')}` : ''}
+${lifeOS.challenges?.length ? `Current Challenges: ${lifeOS.challenges.join(', ')}` : ''}
+${lifeOS.strategies?.length ? `Operating Principles: ${lifeOS.strategies.join(' | ')}` : ''}
+(When coaching, reference the user's mission or values if today's actions align or conflict with them.)
+` : ''
+
     const prompt = `CONTEXT: It is ${timeOfDay} on ${dayOfWeek ?? ''}, ${date}. XP Level ${xpLevel ?? 1}, earned ${xpToday ?? 0} XP today.
+${lifeOSContext}
 
 TODAY'S NUMBERS:
 - Habits: ${habitsDone}/${habitsTotal} done (${habitRate}%) — ${habitStatus}

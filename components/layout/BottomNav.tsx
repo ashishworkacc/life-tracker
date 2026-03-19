@@ -17,6 +17,7 @@ const MORE_SECTIONS = [
   { href: '/journal',   icon: '📓', label: 'Journal' },
   { href: '/cravings',  icon: '⚠️', label: 'Cravings' },
   { href: '/chat',      icon: '💬', label: 'AI Chat' },
+  { href: '/life-os',   icon: '🧬', label: 'Life OS' },
   { href: '/settings',  icon: '⚙️', label: 'Settings' },
 ]
 
