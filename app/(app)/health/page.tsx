@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/lib/hooks/useAuth'
-import { queryDocuments, todayDate, where } from '@/lib/firebase/db'
+import { queryDocuments, todayDate } from '@/lib/firebase/db'
 import Link from 'next/link'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -143,10 +143,10 @@ export default function HealthPage() {
     setLoading(true)
     setLoadError('')
     try {
-      // Query without orderBy/limit to avoid composite index requirement (sort client-side)
+      // Query user subcollections — no userId field needed, no composite index required
       const [hDocs, wDocs] = await Promise.all([
-        queryDocuments('apple_health_logs', [where('userId', '==', user!.uid)]),
-        queryDocuments('workout_logs',      [where('userId', '==', user!.uid)]),
+        queryDocuments(`users/${user!.uid}/health_logs`,  []),
+        queryDocuments(`users/${user!.uid}/workout_logs`, []),
       ])
       // Sort descending by date, take last 30 days / 60 workouts
       const logs = hDocs

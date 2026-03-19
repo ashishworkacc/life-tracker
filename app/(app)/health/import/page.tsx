@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { useAuth } from '@/lib/hooks/useAuth'
+import { setDocument } from '@/lib/firebase/db'
 import Link from 'next/link'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -125,12 +126,10 @@ function parseWorkoutBlock(buf: string, workouts: WorkoutRecord[], cutoffStr: st
   const date = startM[1].substring(0, 10)
   if (date < cutoffStr) return
 
-  // Calories: check main element first, then WorkoutStatistics
   let calories: number | undefined
   const calM = RX_W_CAL.exec(firstLine)
   if (calM) calories = Math.round(parseFloat(calM[1]))
 
-  // Distance: check main element first, then WorkoutStatistics
   let distance: number | undefined
   let distUnit: string | undefined
   const distM = RX_W_DIST.exec(firstLine); const distUM = RX_W_DSTU.exec(firstLine)
@@ -196,7 +195,7 @@ export default function HealthImportPage() {
       if (!xmlEntry) throw new Error('No export.xml found in the ZIP. Export from Health app → Profile → Export All Health Data.')
       setProgress(12); setLabel(`Decompressing ${xmlEntry.name}…`)
 
-      // Step 2: stream as Uint8Array (avoids single-string memory issue)
+      // Step 2: stream as Uint8Array (avoids single-string memory issue on 600MB+ files)
       setPhase('parsing')
       const xmlBuf = await xmlEntry.async('arraybuffer')
       const uint8 = new Uint8Array(xmlBuf)
@@ -241,7 +240,6 @@ export default function HealthImportPage() {
             continue
           }
           if (t.startsWith('<Workout ')) {
-            // Quick date check before entering workout mode
             const startM = RX_START.exec(t)
             if (!startM || startM[1].substring(0, 10) < cutoffStr) continue
             inWorkout = true; workoutBuf = t + '\n'
@@ -309,59 +307,62 @@ export default function HealthImportPage() {
       }
 
       // Step 4: finalize days
-      setProgress(73); setLabel('Finalizing…')
+      setProgress(73); setLabel('Finalizing records…')
+      const syncedAt = new Date().toISOString()
       const finalDays = Array.from(dayMap.values())
         .map(finalizeDay)
         .filter(d => Object.keys(d).length > 1)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)))
 
-      // Step 5: upload in batches — check every response
+      // Step 5: write directly to Firestore (client-side with auth — no server needed)
       setPhase('uploading')
-      const BATCH = 30   // smaller batches = faster per-request, less timeout risk
-      let done = 0
-      let totalSaved = 0
+      const healthPath = `users/${user.uid}/health_logs`
+      const workoutPath = `users/${user.uid}/workout_logs`
 
-      for (let i = 0; i < finalDays.length; i += BATCH) {
-        const batch = finalDays.slice(i, i + BATCH)
-        const res = await fetch('/api/health/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.uid, records: batch, workouts: [] }),
-        })
-        if (!res.ok) {
-          const err = await res.text()
-          throw new Error(`API error saving days ${i}–${i + batch.length}: ${err}`)
-        }
-        const json = await res.json()
-        totalSaved += json.days?.saved ?? batch.length
-        done += batch.length
-        setProgress(75 + Math.round((done / (finalDays.length + workouts.length + 1)) * 20))
-        setLabel(`Saving days… ${done}/${finalDays.length}`)
-        await new Promise(r => setTimeout(r, 30))
+      setProgress(75); setLabel(`Saving ${finalDays.length} days to Firestore…`)
+
+      // Write health records — all at once with allSettled
+      const dayResults = await Promise.allSettled(
+        finalDays.map(day =>
+          setDocument(healthPath, String(day.date), { ...day, syncedAt })
+        )
+      )
+      const dayOk   = dayResults.filter(r => r.status === 'fulfilled').length
+      const dayFail = dayResults.filter(r => r.status === 'rejected').length
+      if (dayFail > 0) {
+        const firstErr = dayResults.find(r => r.status === 'rejected') as PromiseRejectedResult
+        console.error('Health write error (first):', firstErr.reason)
       }
 
-      // Upload workouts
-      let wktSaved = 0
-      for (let i = 0; i < workouts.length; i += BATCH) {
-        const batch = workouts.slice(i, i + BATCH)
-        const res = await fetch('/api/health/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.uid, records: [], workouts: batch }),
+      setProgress(88); setLabel(`Saving ${workouts.length} workouts…`)
+
+      // Write workouts
+      const wktResults = await Promise.allSettled(
+        workouts.map(w => {
+          const safeStart = w.startDate.replace(/[^0-9]/g, '').substring(0, 14)
+          return setDocument(workoutPath, safeStart, {
+            ...w,
+            endDate: w.endDate ?? w.startDate,
+            duration: Math.round(w.duration ?? 0),
+            calories: w.calories != null ? Math.round(w.calories) : null,
+            syncedAt,
+          })
         })
-        if (!res.ok) {
-          const err = await res.text()
-          throw new Error(`API error saving workouts ${i}–${i + batch.length}: ${err}`)
-        }
-        const json = await res.json()
-        wktSaved += json.workouts?.saved ?? batch.length
-        setLabel(`Saving workouts… ${Math.min(i + BATCH, workouts.length)}/${workouts.length}`)
-        await new Promise(r => setTimeout(r, 30))
+      )
+      const wktOk   = wktResults.filter(r => r.status === 'fulfilled').length
+      const wktFail = wktResults.filter(r => r.status === 'rejected').length
+      if (wktFail > 0) {
+        const firstErr = wktResults.find(r => r.status === 'rejected') as PromiseRejectedResult
+        console.error('Workout write error (first):', firstErr.reason)
+      }
+
+      if (dayOk === 0 && finalDays.length > 0) {
+        throw new Error(`All ${finalDays.length} day records failed to save. Check Firestore rules or network.`)
       }
 
       setResult({
-        days: totalSaved || finalDays.length,
-        workouts: wktSaved || workouts.length,
+        days: dayOk,
+        workouts: wktOk,
         from: String(finalDays[0]?.date ?? ''),
         to: String(finalDays[finalDays.length - 1]?.date ?? ''),
       })
@@ -383,7 +384,7 @@ export default function HealthImportPage() {
         <Link href="/health" style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textDecoration: 'none' }}>← Health Hub</Link>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0.25rem 0 0.2rem' }}>📥 Import Apple Health Data</h1>
         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-          Parses last 30 days only · Runs entirely in browser · Raw XML never uploaded
+          Parses last 30 days only · Writes directly to Firestore · Raw XML never uploaded
         </p>
       </div>
 
@@ -426,7 +427,7 @@ export default function HealthImportPage() {
             <div style={{ width: 28, height: 28, borderRadius: '50%', border: '3px solid #14b8a6', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
             <div>
               <p style={{ fontWeight: 700, margin: 0, fontSize: '0.9rem' }}>
-                {phase === 'reading' ? 'Reading ZIP…' : phase === 'parsing' ? 'Parsing (last 30 days only)…' : 'Saving to cloud…'}
+                {phase === 'reading' ? 'Reading ZIP…' : phase === 'parsing' ? 'Parsing (last 30 days only)…' : 'Saving to Firestore…'}
               </p>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>{label}</p>
             </div>
@@ -452,8 +453,8 @@ export default function HealthImportPage() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.85rem' }}>
               {[
-                { label: 'Days imported', val: result.days, icon: '📅', c: '#14b8a6' },
-                { label: 'Workouts', val: result.workouts, icon: '🏋️', c: '#10b981' },
+                { label: 'Days saved', val: result.days, icon: '📅', c: '#14b8a6' },
+                { label: 'Workouts saved', val: result.workouts, icon: '🏋️', c: '#10b981' },
               ].map(x => (
                 <div key={x.label} style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '0.6rem 0.75rem' }}>
                   <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', margin: '0 0 0.15rem' }}>{x.icon} {x.label}</p>
@@ -476,7 +477,7 @@ export default function HealthImportPage() {
             </div>
           </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-            💡 Export & upload daily for fresh data — imports are always incremental.
+            💡 Export &amp; upload daily for fresh data — imports are always incremental.
           </p>
         </div>
       )}
