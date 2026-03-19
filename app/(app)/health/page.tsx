@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/lib/hooks/useAuth'
-import { queryDocuments, todayDate, where, orderBy, limit } from '@/lib/firebase/db'
+import { queryDocuments, todayDate, where } from '@/lib/firebase/db'
 import Link from 'next/link'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -141,16 +141,26 @@ export default function HealthPage() {
   async function load() {
     setLoading(true)
     try {
+      // Query without orderBy/limit to avoid composite index requirement (sort client-side)
       const [hDocs, wDocs] = await Promise.all([
-        queryDocuments('apple_health_logs', [where('userId', '==', user!.uid), orderBy('date', 'desc'), limit(30)]),
-        queryDocuments('workout_logs',      [where('userId', '==', user!.uid), orderBy('date', 'desc'), limit(60)]),
+        queryDocuments('apple_health_logs', [where('userId', '==', user!.uid)]),
+        queryDocuments('workout_logs',      [where('userId', '==', user!.uid)]),
       ])
-      const logs = hDocs.map(d => { const { id: _, ...r } = d; return { id: d.id, ...r } as HealthLog })
-      const wkts = wDocs.map(d => { const { id: _, ...r } = d; return { id: d.id, ...r } as WorkoutLog })
+      // Sort descending by date, take last 30 days / 60 workouts
+      const logs = hDocs
+        .map(d => { const { id: _id, ...r } = d; return { id: d.id, ...r } as HealthLog })
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 30)
+      const wkts = wDocs
+        .map(d => { const { id: _id, ...r } = d; return { id: d.id, ...r } as WorkoutLog })
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 60)
       setHealthLogs(logs)
       setWorkouts(wkts)
       setTodayLog(logs.find(l => l.date === today) ?? null)
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error('Health load error:', e)
+    }
     setLoading(false)
   }
 
