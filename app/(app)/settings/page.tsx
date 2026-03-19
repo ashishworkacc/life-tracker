@@ -12,6 +12,7 @@ export default function SettingsPage() {
 
   const [identityStatement, setIdentityStatement] = useState('')
   const [graceModeEnabled, setGraceModeEnabled] = useState(false)
+  const [dayStartHour, setDayStartHour] = useState(5) // Custom day reset — default 5 AM
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -26,6 +27,7 @@ export default function SettingsPage() {
     if (doc) {
       setIdentityStatement(doc.identityStatement ?? '')
       setGraceModeEnabled(doc.graceModeEnabled ?? false)
+      setDayStartHour(doc.dayStartHour ?? 5)
     }
   }
 
@@ -35,6 +37,7 @@ export default function SettingsPage() {
     await updateUserDoc(user.uid, {
       identityStatement,
       graceModeEnabled,
+      dayStartHour,
     })
     setSaving(false)
     setSaved(true)
@@ -96,6 +99,28 @@ export default function SettingsPage() {
               style={{ left: graceModeEnabled ? '22px' : '2px' }} />
           </button>
         </div>
+      </div>
+
+      {/* Custom Day Reset */}
+      <div className="card space-y-3">
+        <div>
+          <h3 className="font-semibold text-sm mb-1">🌙 Custom Day Reset</h3>
+          <p className="text-xs text-muted">Your "today" rolls over at this hour — ideal if you work late nights or past midnight.</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <input
+            type="range" min={0} max={8} step={1}
+            value={dayStartHour}
+            onChange={e => setDayStartHour(Number(e.target.value))}
+            style={{ flex: 1, accentColor: '#14b8a6' }}
+          />
+          <span style={{ minWidth: 56, textAlign: 'center', fontWeight: 700, color: '#14b8a6', fontSize: '0.9rem' }}>
+            {dayStartHour === 0 ? 'Midnight' : `${dayStartHour}:00 AM`}
+          </span>
+        </div>
+        <p className="text-[10px] text-muted">
+          If you sleep at 3 AM, set this to 4–5 AM so your habits reset after you sleep, not while you&apos;re still awake.
+        </p>
       </div>
 
       {/* Save */}

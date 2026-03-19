@@ -92,6 +92,11 @@ export default function CommandCenterPage() {
   const [foodStats, setFoodStats] = useState({ calories: 0, protein: 0 })
   const [oneThingTodoId, setOneThingTodoId] = useState('')
   const [activeGoals, setActiveGoals] = useState<GoalSummary[]>([])
+  // Correlation Engine
+  interface Correlation { title: string; finding: string; action: string; strength: 'strong'|'moderate'|'weak'; trackers: string[] }
+  const [correlations, setCorrelations] = useState<Correlation[]>([])
+  const [correlationsLoading, setCorrelationsLoading] = useState(false)
+  const [correlationsLoaded, setCorrelationsLoaded] = useState(false)
 
   // ── UI state ──
   const [oneThing, setOneThing] = useState('')
@@ -101,6 +106,11 @@ export default function CommandCenterPage() {
   const [saved, setSaved]       = useState(false)
   const [xpPops, setXpPops]     = useState<{ id: number; amount: number; habitId: string }[]>([])
   const xpPopIdRef              = useRef(0)
+  // Time-of-day habit filter — default to current time slice
+  const defaultFilter = (() => { if (hour < 12) return 'morning'; if (hour < 17) return 'afternoon'; return 'evening' })()
+  const [habitTimeFilter, setHabitTimeFilter] = useState<'all' | 'morning' | 'afternoon' | 'evening'>(defaultFilter as 'morning' | 'afternoon' | 'evening')
+  // Last week habit stats for delta
+  const [lastWeekHabitPct, setLastWeekHabitPct] = useState<number | null>(null)
 
   // ── AI state ──
   const [aiBrief, setAiBrief]   = useState('')
@@ -266,6 +276,22 @@ export default function CommandCenterPage() {
         .slice(0, 3)
     )
 
+    // Last week habit avg (days 7-13 ago)
+    const lastWeekLogs = await queryDocuments('daily_habit_logs', [
+      where('userId', '==', user.uid), orderBy('date', 'desc'), limit(500),
+    ])
+    const last7to13 = Array.from({ length: 7 }).map((_, i) => getDateStr(7 + i))
+    const lwByDay = last7to13.map(dStr => {
+      const dayLogs = (lastWeekLogs as DocumentData[]).filter(l => l.date === dStr)
+      const done = dayLogs.filter(l => l.completed === true).length
+      return { done, total: habitDocs.length }
+    })
+    const lwValid = lwByDay.filter(d => d.total > 0 && d.done > 0)
+    if (lwValid.length > 0) {
+      const avg = lwValid.reduce((s, d) => s + d.done / d.total, 0) / lwByDay.filter(d => d.total > 0).length
+      setLastWeekHabitPct(Math.round(avg * 100))
+    }
+
     setDataLoaded(true)
   }
 
@@ -351,6 +377,34 @@ export default function CommandCenterPage() {
       setQuickThought('')
     } catch { /* ignore */ }
     setSavingThought(false)
+  }
+
+  async function loadCorrelations() {
+    if (!user || correlationsLoading) return
+    setCorrelationsLoading(true)
+    try {
+      const [sleepDocs, allHabitLogs, cravingDocs, allFoodLogs] = await Promise.all([
+        queryDocuments('sleep_logs', [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(30)]),
+        queryDocuments('daily_habit_logs', [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(500)]),
+        queryDocuments('bad_habit_logs', [where('userId', '==', user.uid), orderBy('timestamp', 'desc'), limit(100)]),
+        queryDocuments('food_logs', [where('userId', '==', user.uid), orderBy('date', 'desc'), limit(100)]),
+      ])
+      const res = await fetch('/api/ai/correlations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          sleepLogs: sleepDocs,
+          habitLogs: allHabitLogs,
+          cravingLogs: cravingDocs,
+          foodLogs: allFoodLogs,
+        }),
+      })
+      const data = await res.json()
+      setCorrelations(data.correlations ?? [])
+      setCorrelationsLoaded(true)
+    } catch { setCorrelations([]) }
+    setCorrelationsLoading(false)
   }
 
   async function rateAiBrief(rating: 'up' | 'down') {
@@ -463,10 +517,17 @@ export default function CommandCenterPage() {
   // ── Derived ──
   const { level: xpLevel, earned: xpEarned, needed: xpNeeded } = xpProgress(xpTotal)
   const xpBarPct = Math.round((xpEarned / xpNeeded) * 100)
-  // Only show pending (not-yet-done) habits in Today view; done habits are hidden here
-  const displayHabits = burnoutMode
-    ? habits.filter(h => h.priority === 1 && !habitsDone.has(h.habitId)).slice(0, 3)
-    : habits.filter(h => !habitsDone.has(h.habitId))
+  // Time-filtered habits — only show relevant time-of-day; done habits shown separately as muted ticks
+  const pendingHabits = burnoutMode
+    ? habits.filter(h => h.priority === 1 && !habitsDone.has(h.habitId)).slice(0, 5)
+    : habits.filter(h => !habitsDone.has(h.habitId) &&
+        (habitTimeFilter === 'all' || h.scheduledTime === 'anytime' || h.scheduledTime === habitTimeFilter))
+  const doneHabitsFiltered = habits.filter(h => habitsDone.has(h.habitId) &&
+    (habitTimeFilter === 'all' || h.scheduledTime === 'anytime' || h.scheduledTime === habitTimeFilter))
+  const displayHabits = pendingHabits
+  // Delta vs last week
+  const habitDelta = weeklyHabitPct !== null && lastWeekHabitPct !== null
+    ? weeklyHabitPct - lastWeekHabitPct : null
   const habitDoneCount = habitsDone.size
   const habitTotal = displayHabits.length
   const habitPct = habitTotal > 0 ? Math.round((habitDoneCount / habitTotal) * 100) : 0
@@ -756,7 +817,7 @@ export default function CommandCenterPage() {
 
           {/* 5. HABITS */}
           <section className="card">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-sm flex items-center gap-2">✅ Habits</h3>
               <div className="flex items-center gap-2">
                 <div className="relative" style={{ width: 36, height: 36 }}>
@@ -765,17 +826,45 @@ export default function CommandCenterPage() {
                     <circle cx="18" cy="18" r="14" fill="none" strokeWidth="3.5"
                       stroke={habitRingColor}
                       strokeDasharray={`${2 * Math.PI * 14}`}
-                      strokeDashoffset={`${2 * Math.PI * 14 * (1 - habitPct / 100)}`}
+                      strokeDashoffset={`${2 * Math.PI * 14 * (1 - (habitsDone.size / Math.max(habits.length, 1)) * 100 / 100)}`}
                       strokeLinecap="round"
                       style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
                   </svg>
                   <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold"
-                    style={{ color: habitRingColor }}>{habitPct}%</span>
+                    style={{ color: habitRingColor }}>{Math.round((habitsDone.size / Math.max(habits.length, 1)) * 100)}%</span>
                 </div>
-                <span className="text-xs text-muted">{habitDoneCount}/{habitTotal}</span>
+                <span className="text-xs text-muted">{habitsDone.size}/{habits.length}</span>
+                {habitDelta !== null && (
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: habitDelta >= 0 ? '#22c55e' : '#ef4444', background: habitDelta >= 0 ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', borderRadius: 99, padding: '1px 6px' }}>
+                    {habitDelta >= 0 ? '+' : ''}{habitDelta}%
+                  </span>
+                )}
                 <Link href="/habits" className="text-xs" style={{ color: '#14b8a6' }}>Edit →</Link>
               </div>
             </div>
+
+            {/* Time-of-day filter pills */}
+            {!burnoutMode && habits.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.3rem', marginBottom: '0.75rem', overflowX: 'auto' }}>
+                {(['all', 'morning', 'afternoon', 'evening'] as const).map(f => {
+                  const icons: Record<string, string> = { all: '🌐', morning: '🌅', afternoon: '☀️', evening: '🌙' }
+                  const counts = f === 'all'
+                    ? habits.filter(h => !habitsDone.has(h.habitId)).length
+                    : habits.filter(h => !habitsDone.has(h.habitId) && (h.scheduledTime === f || h.scheduledTime === 'anytime')).length
+                  return (
+                    <button key={f} onClick={() => setHabitTimeFilter(f)}
+                      style={{
+                        padding: '3px 10px', borderRadius: 99, border: 'none', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600, whiteSpace: 'nowrap',
+                        background: habitTimeFilter === f ? 'var(--color-primary)' : 'var(--surface-2)',
+                        color: habitTimeFilter === f ? '#fff' : 'var(--text-muted)',
+                        transition: 'all 0.15s',
+                      }}>
+                      {icons[f]} {f.charAt(0).toUpperCase() + f.slice(1)} {counts > 0 ? `(${counts})` : ''}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
             {habits.length === 0 ? (
               <div className="text-center py-6">
@@ -790,30 +879,44 @@ export default function CommandCenterPage() {
                   const pop  = xpPops.find(p => p.habitId === habit.habitId)
                   return (
                     <button key={habit.id} onClick={() => toggleHabit(habit)}
-                      className="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
+                      className="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left"
                       style={{
-                        background: done ? 'rgba(34,197,94,0.1)' : 'var(--surface-2)',
+                        background: done ? 'rgba(34,197,94,0.08)' : 'var(--surface-2)',
                         border: done ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
+                        transition: 'background 0.25s, border 0.25s, transform 0.1s',
                       }}>
                       {pop && <XpPop amount={pop.amount} onDone={() => setXpPops(p => p.filter(x => x.id !== pop.id))} />}
-                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all ${done ? '' : 'border-2'}`}
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0`}
                         style={done
-                          ? { background: '#22c55e', color: 'white' }
-                          : { borderColor: habit.priority === 1 ? '#ef4444' : habit.priority === 2 ? '#f59e0b' : '#6b7280' }}>
+                          ? { background: '#22c55e', color: 'white', boxShadow: '0 0 8px rgba(34,197,94,0.5)' }
+                          : { border: `2px solid ${habit.priority === 1 ? '#ef4444' : habit.priority === 2 ? '#f59e0b' : '#6b7280'}` }}>
                         {done ? '✓' : ''}
                       </span>
-                      <span className="text-sm flex-1 leading-snug"
-                        style={{ textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--muted)' : 'var(--foreground)' }}>
+                      <span className="text-sm flex-1 leading-snug" style={{ color: done ? '#22c55e' : 'var(--foreground)', fontWeight: done ? 600 : 400 }}>
                         {habit.emoji && <span className="mr-1">{habit.emoji}</span>}{habit.name}
                       </span>
-                      {done && <span className="text-xs font-bold" style={{ color: '#22c55e' }}>✓</span>}
+                      {done && <span className="text-xs font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>done ✓</span>}
                     </button>
                   )
                 })}
+                {/* Completed habits — show as compact ticks */}
+                {doneHabitsFiltered.length > 0 && (
+                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
+                    <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: '0.4rem', fontWeight: 600 }}>COMPLETED ({doneHabitsFiltered.length})</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                      {doneHabitsFiltered.map(h => (
+                        <button key={h.id} onClick={() => toggleHabit(h)}
+                          style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 99, padding: '2px 10px', fontSize: '0.72rem', color: '#22c55e', cursor: 'pointer', fontWeight: 500 }}>
+                          ✓ {h.emoji} {h.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {habitTotal > 0 && habitDoneCount === habitTotal && (
+            {habits.length > 0 && habitsDone.size === habits.length && (
               <div className="mt-3 text-center py-2 rounded-xl"
                 style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
                 <p className="text-sm font-semibold" style={{ color: '#22c55e' }}>🎉 All habits done today! +10 XP each</p>
@@ -825,15 +928,22 @@ export default function CommandCenterPage() {
           <div className="card">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-sm">📈 This Week</h3>
-              {weeklyHabitPct != null && (
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{
-                    background: weeklyHabitPct >= 70 ? 'rgba(34,197,94,0.15)' : weeklyHabitPct >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                    color:      weeklyHabitPct >= 70 ? '#22c55e' : weeklyHabitPct >= 40 ? '#f59e0b' : '#ef4444',
-                  }}>
-                  {weeklyHabitPct}% avg
-                </span>
-              )}
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                {weeklyHabitPct != null && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={{
+                      background: weeklyHabitPct >= 70 ? 'rgba(34,197,94,0.15)' : weeklyHabitPct >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                      color:      weeklyHabitPct >= 70 ? '#22c55e' : weeklyHabitPct >= 40 ? '#f59e0b' : '#ef4444',
+                    }}>
+                    {weeklyHabitPct}% avg
+                  </span>
+                )}
+                {habitDelta !== null && (
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: habitDelta >= 0 ? '#22c55e' : '#ef4444' }}>
+                    {habitDelta >= 0 ? '↑' : '↓'}{Math.abs(habitDelta)}% vs last week
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex justify-between gap-1">
               {Array.from({ length: 7 }).map((_, i) => {
@@ -1027,7 +1137,50 @@ export default function CommandCenterPage() {
             </section>
           )}
 
-          {/* 12. FOOD LOG */}
+          {/* 12. CORRELATION ENGINE */}
+          <section className="card" style={{ border: '1px solid rgba(20,184,166,0.15)' }}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="font-semibold text-sm flex items-center gap-1.5">🔗 Correlation Engine</h3>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>What CAUSES your patterns</p>
+              </div>
+              <button onClick={loadCorrelations} disabled={correlationsLoading}
+                className="text-xs px-2.5 py-1 rounded-lg disabled:opacity-40"
+                style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6' }}>
+                {correlationsLoading ? '⏳' : correlationsLoaded ? '↻ Refresh' : '🔍 Analyse'}
+              </button>
+            </div>
+            {correlationsLoading ? (
+              <div className="flex items-center gap-1.5 py-1">
+                {[0, 0.15, 0.3].map((d, i) => (
+                  <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#14b8a6', animationDelay: `${d}s` }} />
+                ))}
+                <span className="text-xs text-muted ml-1">Cross-referencing your trackers…</span>
+              </div>
+            ) : correlations.length > 0 ? (
+              <div className="space-y-3">
+                {correlations.map((c, i) => {
+                  const sColor = c.strength === 'strong' ? '#ef4444' : c.strength === 'moderate' ? '#f59e0b' : '#6b7280'
+                  return (
+                    <div key={i} style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '0.75rem', border: `1px solid ${sColor}20` }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                        <p style={{ fontSize: '0.82rem', fontWeight: 700, flex: 1 }}>{c.title}</p>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 600, color: sColor, background: `${sColor}15`, borderRadius: 99, padding: '1px 7px', flexShrink: 0 }}>{c.strength}</span>
+                      </div>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--foreground)', marginBottom: '0.3rem', lineHeight: 1.5 }}>{c.finding}</p>
+                      <p style={{ fontSize: '0.73rem', color: '#14b8a6', fontWeight: 500 }}>→ {c.action}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : !correlationsLoaded ? (
+              <p className="text-xs text-muted">Tap Analyse — AI cross-references your sleep, habits, cravings &amp; food to find hidden patterns.</p>
+            ) : (
+              <p className="text-xs text-muted">Not enough data yet — log more days to unlock correlations.</p>
+            )}
+          </section>
+
+          {/* 13. FOOD LOG */}
           <section className="card">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-sm flex items-center gap-2">🥗 Food Today</h3>
@@ -1054,24 +1207,23 @@ export default function CommandCenterPage() {
 
       </div>{/* end desktop-two-col */}
 
-      {/* ── Full-width footer: burnout toggle + save ── */}
-      <div className="flex justify-end">
+      {/* ── Full-width footer: maintenance mode + mini save ── */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <button onClick={() => setBurnoutMode(v => !v)}
           className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full"
           style={{
             background: burnoutMode ? 'rgba(99,102,241,0.15)' : 'var(--surface-2)',
             color: burnoutMode ? '#818cf8' : 'var(--muted)',
-            border: '1px solid var(--border)',
+            border: `1px solid ${burnoutMode ? 'rgba(99,102,241,0.4)' : 'var(--border)'}`,
           }}>
-          {burnoutMode ? '🌙 Rest mode on' : '🌙 Burnout mode'}
+          {burnoutMode ? '🛡️ Maintenance Mode ON — showing core only' : '🛡️ Maintenance Mode'}
+        </button>
+        <button onClick={handleSave} disabled={saving}
+          className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-full font-semibold disabled:opacity-50"
+          style={{ background: saved ? 'rgba(34,197,94,0.15)' : 'rgba(20,184,166,0.12)', color: saved ? '#22c55e' : '#14b8a6', border: `1px solid ${saved ? 'rgba(34,197,94,0.3)' : 'rgba(20,184,166,0.3)'}` }}>
+          {saving ? '⏳ Saving…' : saved ? '✓ +20 XP logged' : '⚡ Log check-in (+20 XP)'}
         </button>
       </div>
-
-      <button onClick={handleSave} disabled={saving}
-        className="w-full py-4 rounded-2xl font-semibold text-sm disabled:opacity-50"
-        style={{ background: saved ? '#22c55e' : '#14b8a6', color: 'white', boxShadow: '0 4px 15px rgba(20,184,166,0.3)' }}>
-        {saving ? 'Saving…' : saved ? '✓ Saved! +20 XP' : burnoutMode ? '🌙 Save & rest' : '⚡ Save today\'s data'}
-      </button>
 
     </div>
   )

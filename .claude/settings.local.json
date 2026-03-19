@@ -48,7 +48,11 @@
       "Bash(vercel --version)",
       "Bash(npx vercel:*)",
       "Bash(gh repo:*)",
-      "Bash(grep -r electricity /Users/ashish/Documents/Life_Tracker --include=*.tsx --include=*.ts)"
+      "Bash(grep -r electricity /Users/ashish/Documents/Life_Tracker --include=*.tsx --include=*.ts)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); deps=d.get\\(''''deployments'''',[]\\); print\\(deps[0].get\\(''''url'''',''''''''\\) if deps else ''''check vercel dashboard''''\\)\")"
     ]
   }
 }
