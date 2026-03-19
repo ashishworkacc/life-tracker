@@ -315,38 +315,55 @@ export default function HealthImportPage() {
         .filter(d => Object.keys(d).length > 1)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)))
 
-      // Step 5: upload in batches
+      // Step 5: upload in batches — check every response
       setPhase('uploading')
-      const BATCH = 50
+      const BATCH = 30   // smaller batches = faster per-request, less timeout risk
       let done = 0
+      let totalSaved = 0
+
       for (let i = 0; i < finalDays.length; i += BATCH) {
-        await fetch('/api/health/import', {
+        const batch = finalDays.slice(i, i + BATCH)
+        const res = await fetch('/api/health/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.uid, records: finalDays.slice(i, i + BATCH), workouts: [] }),
+          body: JSON.stringify({ userId: user.uid, records: batch, workouts: [] }),
         })
-        done += Math.min(BATCH, finalDays.length - i)
-        setProgress(75 + Math.round((done / (finalDays.length || 1)) * 15))
+        if (!res.ok) {
+          const err = await res.text()
+          throw new Error(`API error saving days ${i}–${i + batch.length}: ${err}`)
+        }
+        const json = await res.json()
+        totalSaved += json.days?.saved ?? batch.length
+        done += batch.length
+        setProgress(75 + Math.round((done / (finalDays.length + workouts.length + 1)) * 20))
         setLabel(`Saving days… ${done}/${finalDays.length}`)
-        await new Promise(r => setTimeout(r, 50))
+        await new Promise(r => setTimeout(r, 30))
       }
 
       // Upload workouts
-      if (workouts.length > 0) {
-        for (let i = 0; i < workouts.length; i += BATCH) {
-          await fetch('/api/health/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: user.uid, records: [], workouts: workouts.slice(i, i + BATCH) }),
-          })
-          setLabel(`Saving workouts… ${Math.min(i + BATCH, workouts.length)}/${workouts.length}`)
-          await new Promise(r => setTimeout(r, 50))
+      let wktSaved = 0
+      for (let i = 0; i < workouts.length; i += BATCH) {
+        const batch = workouts.slice(i, i + BATCH)
+        const res = await fetch('/api/health/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.uid, records: [], workouts: batch }),
+        })
+        if (!res.ok) {
+          const err = await res.text()
+          throw new Error(`API error saving workouts ${i}–${i + batch.length}: ${err}`)
         }
+        const json = await res.json()
+        wktSaved += json.workouts?.saved ?? batch.length
+        setLabel(`Saving workouts… ${Math.min(i + BATCH, workouts.length)}/${workouts.length}`)
+        await new Promise(r => setTimeout(r, 30))
       }
 
       setResult({
-        days: finalDays.length, workouts: workouts.length,
-        from: String(finalDays[0]?.date ?? ''), to: String(finalDays[finalDays.length - 1]?.date ?? ''),
+        days: totalSaved || finalDays.length,
+        workouts: wktSaved || workouts.length,
+        from: String(finalDays[0]?.date ?? ''),
+        to: String(finalDays[finalDays.length - 1]?.date ?? ''),
       })
       setProgress(100); setLabel('Done!')
       setPhase('done')
@@ -445,9 +462,13 @@ export default function HealthImportPage() {
               ))}
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <Link href="/health" style={{ flex: 1, textAlign: 'center', background: '#14b8a6', color: '#fff', textDecoration: 'none', borderRadius: 8, padding: '0.6rem', fontWeight: 700, fontSize: '0.85rem' }}>
+              {/* Hard redirect — bypasses Next.js page cache so fresh data loads */}
+              <button
+                onClick={() => { window.location.href = '/health' }}
+                style={{ flex: 1, background: '#14b8a6', color: '#fff', border: 'none', borderRadius: 8, padding: '0.6rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer' }}
+              >
                 📊 View Health Hub
-              </Link>
+              </button>
               <button onClick={() => { setPhase('idle'); setProgress(0); setResult(null) }}
                 style={{ flex: 1, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 8, padding: '0.6rem', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer' }}>
                 Upload again

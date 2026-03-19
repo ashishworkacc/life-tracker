@@ -134,12 +134,14 @@ export default function HealthPage() {
   const [workouts, setWorkouts] = useState<WorkoutLog[]>([])
   const [todayLog, setTodayLog] = useState<HealthLog | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [tab, setTab] = useState<'today' | 'trends' | 'workouts'>('today')
 
   useEffect(() => { if (user) load() }, [user])
 
   async function load() {
     setLoading(true)
+    setLoadError('')
     try {
       // Query without orderBy/limit to avoid composite index requirement (sort client-side)
       const [hDocs, wDocs] = await Promise.all([
@@ -158,8 +160,9 @@ export default function HealthPage() {
       setHealthLogs(logs)
       setWorkouts(wkts)
       setTodayLog(logs.find(l => l.date === today) ?? null)
-    } catch (e) {
+    } catch (e: any) {
       console.error('Health load error:', e)
+      setLoadError(String(e?.message ?? e))
     }
     setLoading(false)
   }
@@ -184,6 +187,16 @@ export default function HealthPage() {
 
   if (loading) return <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading health data…</div>
 
+  if (loadError) return (
+    <div style={{ maxWidth: 600, margin: '2rem auto', padding: '0 1rem' }}>
+      <div style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: '1.25rem' }}>
+        <p style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.4rem' }}>⚠️ Could not load health data</p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.85rem', fontFamily: 'monospace' }}>{loadError}</p>
+        <button onClick={load} style={{ background: '#14b8a6', color: '#fff', border: 'none', borderRadius: 8, padding: '0.5rem 1.25rem', fontWeight: 700, cursor: 'pointer' }}>Retry</button>
+      </div>
+    </div>
+  )
+
   const hasData = healthLogs.length > 0
 
   return (
@@ -198,9 +211,14 @@ export default function HealthPage() {
             {todayLog?.syncedAt && ` · synced ${new Date(todayLog.syncedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}`}
           </p>
         </div>
-        <Link href="/health/import" style={{ background: '#10b981', color: '#fff', borderRadius: 8, padding: '0.45rem 1rem', textDecoration: 'none', fontWeight: 700, fontSize: '0.8rem' }}>
-          📥 Import ZIP
-        </Link>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={load} disabled={loading} style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.25)', borderRadius: 8, padding: '0.45rem 0.85rem', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}>
+            {loading ? '…' : '↺ Refresh'}
+          </button>
+          <Link href="/health/import" style={{ background: '#10b981', color: '#fff', borderRadius: 8, padding: '0.45rem 1rem', textDecoration: 'none', fontWeight: 700, fontSize: '0.8rem' }}>
+            📥 Import ZIP
+          </Link>
+        </div>
       </div>
 
       {/* Tabs */}
