@@ -18,6 +18,7 @@ interface HealthLog {
   steps?: number; activeEnergy?: number; restingEnergy?: number
   exerciseMinutes?: number; standHours?: number
   sleepHours?: number; sleepDeep?: number; sleepRem?: number; sleepCore?: number
+  sleepStart?: string; sleepEnd?: string
   bloodPressureSystolic?: number; bloodPressureDiastolic?: number
 }
 
@@ -30,24 +31,61 @@ interface WorkoutLog {
 
 // ─── Workout config ───────────────────────────────────────────────────────────
 const WORKOUT_INFO: Record<string, { name: string; icon: string; color: string }> = {
-  HKWorkoutActivityTypeWalking:                    { name: 'Walking',           icon: '🚶', color: '#10b981' },
-  HKWorkoutActivityTypeRunning:                    { name: 'Running',           icon: '🏃', color: '#f59e0b' },
-  HKWorkoutActivityTypeCycling:                    { name: 'Cycling',           icon: '🚴', color: '#3b82f6' },
-  HKWorkoutActivityTypeSwimming:                   { name: 'Swimming',          icon: '🏊', color: '#06b6d4' },
-  HKWorkoutActivityTypeYoga:                       { name: 'Yoga',              icon: '🧘', color: '#8b5cf6' },
-  HKWorkoutActivityTypeTraditionalStrengthTraining:{ name: 'Strength',          icon: '💪', color: '#ef4444' },
-  HKWorkoutActivityTypeFunctionalStrengthTraining: { name: 'Functional',        icon: '🏋️', color: '#f97316' },
-  HKWorkoutActivityTypeHighIntensityIntervalTraining: { name: 'HIIT',           icon: '⚡', color: '#eab308' },
-  HKWorkoutActivityTypeBadminton:                  { name: 'Badminton',         icon: '🏸', color: '#14b8a6' },
-  HKWorkoutActivityTypeElliptical:                 { name: 'Elliptical',        icon: '🔄', color: '#a78bfa' },
-  HKWorkoutActivityTypeCrossTraining:              { name: 'Cross Training',    icon: '🤸', color: '#ec4899' },
-  HKWorkoutActivityTypePilates:                    { name: 'Pilates',           icon: '🧗', color: '#64748b' },
-  HKWorkoutActivityTypeDance:                      { name: 'Dance',             icon: '💃', color: '#f43f5e' },
-  HKWorkoutActivityTypeStairClimbing:              { name: 'Stairs',            icon: '🪜', color: '#84cc16' },
-  HKWorkoutActivityTypeRowing:                     { name: 'Rowing',            icon: '🚣', color: '#0ea5e9' },
+  HKWorkoutActivityTypeWalking:                    { name: 'Walking',    icon: '🚶', color: '#10b981' },
+  HKWorkoutActivityTypeRunning:                    { name: 'Running',    icon: '🏃', color: '#f59e0b' },
+  HKWorkoutActivityTypeCycling:                    { name: 'Cycling',    icon: '🚴', color: '#3b82f6' },
+  HKWorkoutActivityTypeSwimming:                   { name: 'Swimming',   icon: '🏊', color: '#06b6d4' },
+  HKWorkoutActivityTypeYoga:                       { name: 'Yoga',       icon: '🧘', color: '#8b5cf6' },
+  HKWorkoutActivityTypeTraditionalStrengthTraining:{ name: 'Strength',   icon: '💪', color: '#ef4444' },
+  HKWorkoutActivityTypeFunctionalStrengthTraining: { name: 'Functional', icon: '🏋️', color: '#f97316' },
+  HKWorkoutActivityTypeHighIntensityIntervalTraining: { name: 'HIIT',    icon: '⚡', color: '#eab308' },
+  HKWorkoutActivityTypeBadminton:                  { name: 'Badminton',  icon: '🏸', color: '#14b8a6' },
+  HKWorkoutActivityTypeElliptical:                 { name: 'Elliptical', icon: '🔄', color: '#a78bfa' },
+  HKWorkoutActivityTypeCrossTraining:              { name: 'Cross Training', icon: '🤸', color: '#ec4899' },
+  HKWorkoutActivityTypePilates:                    { name: 'Pilates',    icon: '🧗', color: '#64748b' },
+  HKWorkoutActivityTypeDance:                      { name: 'Dance',      icon: '💃', color: '#f43f5e' },
+  HKWorkoutActivityTypeStairClimbing:              { name: 'Stairs',     icon: '🪜', color: '#84cc16' },
+  HKWorkoutActivityTypeRowing:                     { name: 'Rowing',     icon: '🚣', color: '#0ea5e9' },
 }
 function workoutInfo(type: string) {
-  return WORKOUT_INFO[type] ?? { name: type.replace('HKWorkoutActivityType','').replace(/([A-Z])/g,' $1').trim(), icon: '🏅', color: '#94a3b8' }
+  return WORKOUT_INFO[type] ?? {
+    name: type.replace('HKWorkoutActivityType','').replace(/([A-Z])/g,' $1').trim(),
+    icon: '🏅', color: '#94a3b8',
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function fmtTime(iso?: string) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+}
+function fmtH(h?: number) {
+  if (!h) return '—'
+  const hrs = Math.floor(h), mins = Math.round((h - hrs) * 60)
+  return `${hrs}h ${mins}m`
+}
+function sleepScore(log: HealthLog | null): number | null {
+  if (!log?.sleepHours) return null
+  const h = log.sleepHours
+  // Duration score 0-40 (8h = 40pts)
+  const durScore = Math.min(40, (h / 8) * 40)
+  // Deep sleep score 0-30 (target 1.5h = 30pts)
+  const deepScore = Math.min(30, ((log.sleepDeep ?? 0) / 1.5) * 30)
+  // REM score 0-30 (target 2h = 30pts)
+  const remScore = Math.min(30, ((log.sleepRem ?? 0) / 2) * 30)
+  return Math.round(durScore + deepScore + remScore)
+}
+function scoreColor(s: number) {
+  if (s >= 80) return '#10b981'
+  if (s >= 60) return '#f59e0b'
+  return '#ef4444'
+}
+function scoreLabel(s: number) {
+  if (s >= 85) return 'Excellent'
+  if (s >= 70) return 'Good'
+  if (s >= 55) return 'Fair'
+  return 'Poor'
 }
 
 // ─── Small ring SVG ───────────────────────────────────────────────────────────
@@ -65,36 +103,10 @@ function Ring({ pct, color, label, size = 58 }: { pct: number; color: string; la
   )
 }
 
-// ─── Sleep stage bar ──────────────────────────────────────────────────────────
-function SleepBar({ deep = 0, rem = 0, core = 0, total = 0 }: { deep?: number; rem?: number; core?: number; total?: number }) {
-  const other = Math.max(0, total - deep - rem - core)
-  const segments = [
-    { label: 'Deep', val: deep,  color: '#4f46e5' },
-    { label: 'REM',  val: rem,   color: '#8b5cf6' },
-    { label: 'Core', val: core,  color: '#14b8a6' },
-    { label: 'Light',val: other, color: '#94a3b8' },
-  ].filter(s => s.val > 0)
-  return (
-    <div>
-      <div style={{ display: 'flex', height: 10, borderRadius: 99, overflow: 'hidden', gap: 2, marginBottom: '0.5rem' }}>
-        {segments.map(s => (
-          <div key={s.label} style={{ flex: s.val, background: s.color, minWidth: s.val > 0 ? 4 : 0, borderRadius: 99 }} />
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-        {segments.map(s => (
-          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
-            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{s.label} {s.val.toFixed(1)}h</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ─── Stat card ───────────────────────────────────────────────────────────────
-function StatCard({ label, value, unit, prev, color, icon }: { label: string; value?: number; unit?: string; prev?: number; color: string; icon: string }) {
+function StatCard({ label, value, unit, prev, color, icon, sub }: {
+  label: string; value?: number; unit?: string; prev?: number; color: string; icon: string; sub?: string
+}) {
   const delta = value !== undefined && prev !== undefined ? value - prev : null
   return (
     <div style={{ background: 'var(--surface)', border: `1px solid ${color}22`, borderRadius: 12, padding: '0.75rem 1rem' }}>
@@ -110,6 +122,7 @@ function StatCard({ label, value, unit, prev, color, icon }: { label: string; va
           )}
         </div>
       ) : <span style={{ fontSize: '1.1rem', color: 'var(--text-muted)' }}>—</span>}
+      {sub && <p style={{ fontSize: '0.62rem', color: 'var(--text-muted)', margin: '0.2rem 0 0' }}>{sub}</p>}
     </div>
   )
 }
@@ -121,6 +134,128 @@ function ChartTip({ active, payload, label, unit }: any) {
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}>
       <p style={{ margin: '0 0 0.2rem', color: 'var(--text-muted)' }}>{label}</p>
       <p style={{ margin: 0, fontWeight: 700, color: payload[0].color }}>{payload[0].value?.toFixed(1)} {unit}</p>
+    </div>
+  )
+}
+
+// ─── Professional Sleep Card ──────────────────────────────────────────────────
+function SleepCard({ log, prev }: { log: HealthLog | null; prev?: HealthLog | null }) {
+  if (!log?.sleepHours) {
+    return (
+      <div className="card" style={{ border: '1px solid rgba(99,102,241,0.2)' }}>
+        <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#6366f1', margin: '0 0 0.5rem' }}>💤 Sleep</p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No sleep data for today</p>
+      </div>
+    )
+  }
+
+  const score = sleepScore(log)
+  const deep = log.sleepDeep ?? 0
+  const rem  = log.sleepRem  ?? 0
+  const core = log.sleepCore ?? 0
+  const total = log.sleepHours
+  const light = Math.max(0, total - deep - rem - core)
+  const prevDelta = prev?.sleepHours ? (total - prev.sleepHours) : null
+
+  const stages = [
+    { label: 'Deep',  val: deep,  color: '#4f46e5', pct: (deep  / total) * 100, tip: 'Restorative, memory consolidation' },
+    { label: 'REM',   val: rem,   color: '#8b5cf6', pct: (rem   / total) * 100, tip: 'Dreaming, emotional processing' },
+    { label: 'Core',  val: core,  color: '#14b8a6', pct: (core  / total) * 100, tip: 'Light NREM, physical restoration' },
+    { label: 'Light', val: light, color: '#64748b', pct: (light / total) * 100, tip: 'Transition sleep, least restorative' },
+  ].filter(s => s.val > 0)
+
+  return (
+    <div className="card" style={{ border: '1px solid rgba(99,102,241,0.2)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#6366f1', margin: '0 0 0.15rem' }}>💤 Sleep</p>
+          {log.sleepStart && log.sleepEnd && (
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: 0 }}>
+              {fmtTime(log.sleepStart)} → {fmtTime(log.sleepEnd)}
+            </p>
+          )}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
+            <span style={{ fontSize: '2rem', fontWeight: 800, color: total >= 7 ? '#10b981' : total >= 6 ? '#f59e0b' : '#ef4444', lineHeight: 1 }}>
+              {fmtH(total)}
+            </span>
+            {prevDelta !== null && (
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: prevDelta > 0 ? '#22c55e' : '#ef4444' }}>
+                {prevDelta > 0 ? '+' : ''}{fmtH(Math.abs(prevDelta))}
+              </span>
+            )}
+          </div>
+          {score !== null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', justifyContent: 'flex-end', marginTop: '0.15rem' }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', border: `3px solid ${scoreColor(score)}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.62rem', fontWeight: 800, color: scoreColor(score), flexShrink: 0 }}>
+                {score}
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: scoreColor(score) }}>{scoreLabel(score)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Stage bar */}
+      <div>
+        <div style={{ display: 'flex', height: 12, borderRadius: 99, overflow: 'hidden', gap: 2, marginBottom: '0.6rem' }}>
+          {stages.map(s => (
+            <div key={s.label} style={{ flex: s.val, background: s.color, borderRadius: 99, minWidth: 2 }} />
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '0.4rem' }}>
+          {stages.map(s => (
+            <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem',
+              background: `${s.color}10`, borderRadius: 8, padding: '0.35rem 0.6rem' }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'baseline' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: s.color }}>{fmtH(s.val)}</span>
+                  <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>{s.pct.toFixed(0)}%</span>
+                </div>
+                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>{s.label}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Targets vs actual */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.4rem' }}>
+        {[
+          { label: 'Total', val: total, target: 8, unit: 'h', color: '#6366f1' },
+          { label: 'Deep',  val: deep,  target: 1.5, unit: 'h', color: '#4f46e5' },
+          { label: 'REM',   val: rem,   target: 2,   unit: 'h', color: '#8b5cf6' },
+        ].map(m => {
+          const pct = Math.min(100, (m.val / m.target) * 100)
+          const ok = pct >= 85
+          return (
+            <div key={m.label} style={{ textAlign: 'center', background: 'var(--surface-2)', borderRadius: 8, padding: '0.5rem 0.3rem' }}>
+              <p style={{ fontSize: '0.6rem', color: 'var(--text-muted)', margin: '0 0 0.25rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{m.label}</p>
+              <div style={{ position: 'relative', height: 4, background: 'var(--border)', borderRadius: 99, margin: '0 0 0.25rem' }}>
+                <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: ok ? '#10b981' : m.color, borderRadius: 99 }} />
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: ok ? '#10b981' : m.color }}>
+                {m.val.toFixed(1)}<span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontWeight: 400 }}>/{m.target}{m.unit}</span>
+              </span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Insight */}
+      {score !== null && (
+        <div style={{ background: `${scoreColor(score)}10`, border: `1px solid ${scoreColor(score)}25`, borderRadius: 8, padding: '0.5rem 0.75rem', fontSize: '0.75rem', color: scoreColor(score), fontWeight: 600 }}>
+          {score >= 85 ? '✅ Great recovery — ideal day for hard workouts or deep focus'
+           : score >= 70 ? '🟡 Decent sleep — moderate intensity activities recommended'
+           : score >= 55 ? '⚠️ Below average — prioritise rest; avoid heavy training'
+           : '🔴 Poor sleep — rest today, avoid caffeine after 2 PM'}
+        </div>
+      )}
     </div>
   )
 }
@@ -143,12 +278,10 @@ export default function HealthPage() {
     setLoading(true)
     setLoadError('')
     try {
-      // Query user subcollections — no userId field needed, no composite index required
       const [hDocs, wDocs] = await Promise.all([
         queryDocuments(`users/${user!.uid}/health_logs`,  []),
         queryDocuments(`users/${user!.uid}/workout_logs`, []),
       ])
-      // Sort descending by date, take last 30 days / 60 workouts
       const logs = hDocs
         .map(d => { const { id: _id, ...r } = d; return { id: d.id, ...r } as HealthLog })
         .sort((a, b) => b.date.localeCompare(a.date))
@@ -159,7 +292,7 @@ export default function HealthPage() {
         .slice(0, 60)
       setHealthLogs(logs)
       setWorkouts(wkts)
-      setTodayLog(logs.find(l => l.date === today) ?? null)
+      setTodayLog(logs.find(l => l.date === today) ?? logs[0] ?? null)
     } catch (e: any) {
       console.error('Health load error:', e)
       setLoadError(String(e?.message ?? e))
@@ -167,18 +300,39 @@ export default function HealthPage() {
     setLoading(false)
   }
 
-  // Build chart data (sorted asc)
+  // Most-recent value for a field (body composition not logged every day)
+  function latest(key: keyof HealthLog): number | undefined {
+    for (const l of healthLogs) {
+      if (l[key] !== undefined) return l[key] as number
+    }
+    return undefined
+  }
+  function latestLog(key: keyof HealthLog): HealthLog | null {
+    for (const l of healthLogs) {
+      if (l[key] !== undefined) return l
+    }
+    return null
+  }
+  function prevFor(key: keyof HealthLog): number | undefined {
+    let found = false
+    for (const l of healthLogs) {
+      if (l[key] !== undefined) {
+        if (found) return l[key] as number
+        found = true
+      }
+    }
+    return undefined
+  }
+
   const sorted30 = [...healthLogs].sort((a, b) => a.date.localeCompare(b.date))
-  const chartFmt = (d: string) => d.substring(5) // "05-14"
+  const chartFmt = (d: string) => d.substring(5)
 
   function chartData(key: keyof HealthLog) {
     return sorted30.filter(l => l[key] !== undefined).map(l => ({ date: chartFmt(l.date), value: l[key] as number }))
   }
 
-  // Previous day (for delta)
   const prevLog = healthLogs.length > 1 ? healthLogs[1] : null
 
-  // Workout summary
   const totalWorkoutTime = workouts.reduce((s, w) => s + (w.duration ?? 0), 0)
   const totalWorkoutCal  = workouts.reduce((s, w) => s + (w.calories ?? 0), 0)
   const workoutTypeCounts = workouts.reduce((acc, w) => {
@@ -250,36 +404,42 @@ export default function HealthPage() {
       {tab === 'today' && hasData && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
 
-          {/* Body Composition */}
-          <div className="card" style={{ border: '1px solid rgba(139,92,246,0.2)' }}>
-            <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#8b5cf6', margin: '0 0 0.85rem' }}>⚖️ Body Composition</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px,1fr))', gap: '0.5rem', marginBottom: todayLog?.bodyFat ? '1rem' : 0 }}>
-              <StatCard label="Weight" value={todayLog?.weight} unit="kg" prev={prevLog?.weight} color="#8b5cf6" icon="⚖️" />
-              <StatCard label="Body Fat" value={todayLog?.bodyFat} unit="%" prev={prevLog?.bodyFat} color="#ec4899" icon="📊" />
-              <StatCard label="Lean Mass" value={todayLog?.leanMass} unit="kg" prev={prevLog?.leanMass} color="#10b981" icon="💪" />
-              <StatCard label="BMI" value={todayLog?.bmi} unit="" prev={prevLog?.bmi} color="#f59e0b" icon="📐" />
-            </div>
-
-            {/* Body composition bar */}
-            {todayLog?.bodyFat && todayLog?.weight && (() => {
-              const fatPct = todayLog.bodyFat!
-              const leanPct = 100 - fatPct
-              const fatKg = (todayLog.weight! * fatPct / 100)
-              const leanKg = todayLog.weight! - fatKg
-              return (
-                <div style={{ marginTop: '0.75rem' }}>
-                  <div style={{ display: 'flex', height: 14, borderRadius: 99, overflow: 'hidden', marginBottom: '0.4rem' }}>
-                    <div style={{ flex: fatPct, background: 'linear-gradient(90deg,#ec4899,#f97316)', borderRadius: '99px 0 0 99px' }} />
-                    <div style={{ flex: leanPct, background: 'linear-gradient(90deg,#10b981,#14b8a6)', borderRadius: '0 99px 99px 0' }} />
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-                    <span style={{ color: '#ec4899', fontWeight: 700 }}>🔴 Fat {fatPct.toFixed(1)}% · {fatKg.toFixed(1)} kg</span>
-                    <span style={{ color: '#10b981', fontWeight: 700 }}>🟢 Lean {leanPct.toFixed(1)}% · {leanKg.toFixed(1)} kg</span>
-                  </div>
+          {/* Body Composition — shows most recent data even if not today */}
+          {(() => {
+            const wLog = latestLog('weight')
+            const sub = wLog && wLog.date !== today ? `Last recorded ${wLog.date}` : undefined
+            return (
+              <div className="card" style={{ border: '1px solid rgba(139,92,246,0.2)' }}>
+                <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#8b5cf6', margin: '0 0 0.85rem' }}>⚖️ Body Composition</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px,1fr))', gap: '0.5rem', marginBottom: latest('bodyFat') ? '1rem' : 0 }}>
+                  <StatCard label="Weight" value={latest('weight')} unit="kg" prev={prevFor('weight')} color="#8b5cf6" icon="⚖️" sub={sub} />
+                  <StatCard label="Body Fat" value={latest('bodyFat')} unit="%" prev={prevFor('bodyFat')} color="#ec4899" icon="📊" />
+                  <StatCard label="Lean Mass" value={latest('leanMass')} unit="kg" prev={prevFor('leanMass')} color="#10b981" icon="💪" />
+                  <StatCard label="BMI" value={latest('bmi')} unit="" prev={prevFor('bmi')} color="#f59e0b" icon="📐" />
                 </div>
-              )
-            })()}
-          </div>
+
+                {latest('bodyFat') && latest('weight') && (() => {
+                  const fatPct = latest('bodyFat')!
+                  const w = latest('weight')!
+                  const leanPct = 100 - fatPct
+                  const fatKg = w * fatPct / 100
+                  const leanKg = w - fatKg
+                  return (
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <div style={{ display: 'flex', height: 14, borderRadius: 99, overflow: 'hidden', marginBottom: '0.4rem' }}>
+                        <div style={{ flex: fatPct, background: 'linear-gradient(90deg,#ec4899,#f97316)', borderRadius: '99px 0 0 99px' }} />
+                        <div style={{ flex: leanPct, background: 'linear-gradient(90deg,#10b981,#14b8a6)', borderRadius: '0 99px 99px 0' }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                        <span style={{ color: '#ec4899', fontWeight: 700 }}>🔴 Fat {fatPct.toFixed(1)}% · {fatKg.toFixed(1)} kg</span>
+                        <span style={{ color: '#10b981', fontWeight: 700 }}>🟢 Lean {leanPct.toFixed(1)}% · {leanKg.toFixed(1)} kg</span>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            )
+          })()}
 
           {/* Heart & Recovery */}
           <div className="card" style={{ border: '1px solid rgba(239,68,68,0.2)' }}>
@@ -288,7 +448,7 @@ export default function HealthPage() {
               <StatCard label="Resting HR" value={todayLog?.heartRateResting} unit="bpm" prev={prevLog?.heartRateResting} color="#ef4444" icon="❤️" />
               <StatCard label="Avg HR" value={todayLog?.heartRateAvg} unit="bpm" prev={prevLog?.heartRateAvg} color="#f97316" icon="💓" />
               <StatCard label="HRV" value={todayLog?.hrv} unit="ms" prev={prevLog?.hrv} color="#f59e0b" icon="📈" />
-              <StatCard label="VO₂ Max" value={todayLog?.vo2Max} unit="ml/kg" prev={prevLog?.vo2Max} color="#14b8a6" icon="🫁" />
+              <StatCard label="VO₂ Max" value={latest('vo2Max')} unit="ml/kg" prev={prevFor('vo2Max')} color="#14b8a6" icon="🫁" />
               <StatCard label="SpO₂" value={todayLog?.spo2} unit="%" prev={prevLog?.spo2} color="#6366f1" icon="🩺" />
             </div>
             {todayLog?.hrv && (() => {
@@ -318,20 +478,8 @@ export default function HealthPage() {
             </div>
           </div>
 
-          {/* Sleep */}
-          <div className="card" style={{ border: '1px solid rgba(99,102,241,0.2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-              <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#6366f1', margin: 0 }}>💤 Sleep</p>
-              {todayLog?.sleepHours && (
-                <span style={{ fontSize: '1.6rem', fontWeight: 800, color: todayLog.sleepHours >= 7 ? '#10b981' : '#f59e0b', lineHeight: 1 }}>
-                  {todayLog.sleepHours.toFixed(1)}h
-                </span>
-              )}
-            </div>
-            {todayLog?.sleepHours ? (
-              <SleepBar deep={todayLog.sleepDeep} rem={todayLog.sleepRem} core={todayLog.sleepCore} total={todayLog.sleepHours} />
-            ) : <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No sleep data for today</p>}
-          </div>
+          {/* Sleep — professional card */}
+          <SleepCard log={todayLog} prev={prevLog} />
 
           {/* Recent workouts */}
           {workouts.length > 0 && (
@@ -431,11 +579,10 @@ export default function HealthPage() {
             </div>
           ) : (
             <>
-              {/* Summary cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.5rem' }}>
                 {[
                   { label: 'Workouts', val: workouts.length, icon: '🏅', color: '#14b8a6' },
-                  { label: 'Total Time', val: `${Math.round(totalWorkoutTime / 60)}h ${totalWorkoutTime % 60}m`, icon: '⏱️', color: '#f59e0b' },
+                  { label: 'Total Time', val: `${Math.floor(totalWorkoutTime / 60)}h ${totalWorkoutTime % 60}m`, icon: '⏱️', color: '#f59e0b' },
                   { label: 'Calories', val: `${Math.round(totalWorkoutCal).toLocaleString()}`, icon: '🔥', color: '#ef4444' },
                 ].map(x => (
                   <div key={x.label} style={{ background: 'var(--surface)', border: `1px solid ${x.color}20`, borderRadius: 12, padding: '0.65rem 0.75rem', textAlign: 'center' }}>
@@ -445,7 +592,6 @@ export default function HealthPage() {
                 ))}
               </div>
 
-              {/* Type breakdown */}
               <div className="card" style={{ border: '1px solid rgba(20,184,166,0.15)' }}>
                 <p style={{ fontSize: '0.82rem', fontWeight: 700, margin: '0 0 0.65rem' }}>Breakdown by type</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
@@ -466,7 +612,6 @@ export default function HealthPage() {
                 </div>
               </div>
 
-              {/* Workout list */}
               <div className="card" style={{ padding: '0.75rem' }}>
                 <p style={{ fontSize: '0.82rem', fontWeight: 700, margin: '0 0 0.65rem 0.25rem' }}>All workouts (last 30 days)</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>

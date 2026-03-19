@@ -14,8 +14,8 @@ interface DailyRecord {
   steps?: number; activeEnergy?: number; restingEnergy?: number
   exerciseMinutes?: number; standHours?: number
   sleepHours?: number; sleepDeep?: number; sleepRem?: number; sleepCore?: number
+  sleepStart?: string; sleepEnd?: string
   bloodPressureSystolic?: number; bloodPressureDiastolic?: number
-  // Internal accumulators – stripped before upload
   [key: string]: number | string | undefined
 }
 
@@ -47,13 +47,6 @@ const RECORD_TYPES: Record<string, { field: string; agg: 'last' | 'sum' | 'avg';
   HKQuantityTypeIdentifierBloodPressureDiastolic:    { field: '_bpDia',        agg: 'avg' },
 }
 
-const ASLEEP_SET = new Set([
-  'HKCategoryValueSleepAnalysisAsleepUnspecified',
-  'HKCategoryValueSleepAnalysisAsleepDeep',
-  'HKCategoryValueSleepAnalysisAsleepREM',
-  'HKCategoryValueSleepAnalysisAsleepCore',
-])
-
 // ─── Regex (pre-compiled) ────────────────────────────────────────────────────
 const RX_TYPE   = /type="([^"]+)"/
 const RX_VALUE  = /\bvalue="([^"]+)"/
@@ -74,6 +67,16 @@ const RX_WS_MAX = /maximum="([^"]+)"/
 const RX_WS_MIN = /minimum="([^"]+)"/
 const RX_WS_SUM = /sum="([^"]+)"/
 
+// ─── Sleep stage types ───────────────────────────────────────────────────────
+const SLEEP_STAGE_MAP: Record<string, 'deep' | 'rem' | 'core' | 'unspecified'> = {
+  HKCategoryValueSleepAnalysisAsleepDeep:        'deep',
+  HKCategoryValueSleepAnalysisAsleepREM:          'rem',
+  HKCategoryValueSleepAnalysisAsleepCore:         'core',
+  HKCategoryValueSleepAnalysisAsleepUnspecified:  'unspecified',
+}
+
+interface SleepInterval { start: Date; end: Date; stage: 'deep' | 'rem' | 'core' | 'unspecified' }
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function getOrCreate(map: Map<string, DailyRecord>, date: string): DailyRecord {
   if (!map.has(date)) map.set(date, { date })
@@ -89,6 +92,44 @@ function applyRecord(day: DailyRecord, field: string, value: number, agg: 'last'
   }
 }
 
+/**
+ * Merge overlapping sleep intervals to avoid double-counting when
+ * iPhone records one big "Unspecified" total AND Apple Watch records
+ * individual stage segments for the same time window.
+ * Returns { totalH, deepH, remH, coreH, firstStart, lastEnd }
+ */
+function aggregateSleep(intervals: SleepInterval[]) {
+  if (intervals.length === 0) return null
+
+  // Sort all by start
+  const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime())
+
+  // Merge overlapping intervals to get true total (union)
+  const merged: [Date, Date][] = []
+  let [cs, ce] = [sorted[0].start, sorted[0].end]
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].start <= ce) {
+      if (sorted[i].end > ce) ce = sorted[i].end
+    } else {
+      merged.push([cs, ce]); cs = sorted[i].start; ce = sorted[i].end
+    }
+  }
+  merged.push([cs, ce])
+
+  const totalH = merged.reduce((s, [a, b]) => s + (b.getTime() - a.getTime()) / 3_600_000, 0)
+
+  // Stage sums — only from non-Unspecified intervals (they don't overlap each other)
+  const staged = intervals.filter(i => i.stage !== 'unspecified')
+  const deepH = staged.filter(i => i.stage === 'deep').reduce((s, i) => s + (i.end.getTime() - i.start.getTime()) / 3_600_000, 0)
+  const remH  = staged.filter(i => i.stage === 'rem' ).reduce((s, i) => s + (i.end.getTime() - i.start.getTime()) / 3_600_000, 0)
+  const coreH = staged.filter(i => i.stage === 'core').reduce((s, i) => s + (i.end.getTime() - i.start.getTime()) / 3_600_000, 0)
+
+  const firstStart = sorted[0].start.toISOString()
+  const lastEnd    = sorted[sorted.length - 1].end.toISOString()
+
+  return { totalH, deepH, remH, coreH, firstStart, lastEnd }
+}
+
 function finalizeDay(d: DailyRecord): Record<string, number | string> {
   const out: Record<string, number | string> = { date: d.date }
   const avgs: [string, string][] = [
@@ -100,15 +141,17 @@ function finalizeDay(d: DailyRecord): Record<string, number | string> {
     const s = d[p + 'Sum'] as number | undefined, c = d[p + 'Cnt'] as number | undefined
     if (s !== undefined && c && c > 0) out[o] = Math.round((s / c) * 10) / 10
   }
-  // stand time: stored as sum of minutes → hours
   const sm = d['_standMinSum'] as number | undefined
   if (sm !== undefined) out.standHours = Math.round(sm / 60 * 10) / 10
 
   const KEEP = ['weight','bodyFat','leanMass','bmi','vo2Max','steps','activeEnergy','restingEnergy',
-    'exerciseMinutes','sleepHours','sleepDeep','sleepRem','sleepCore']
+    'exerciseMinutes','sleepHours','sleepDeep','sleepRem','sleepCore','sleepStart','sleepEnd']
   for (const f of KEEP) {
-    const v = d[f] as number | undefined
-    if (v !== undefined) out[f] = Math.round(v * 100) / 100
+    const v = d[f]
+    if (v !== undefined) {
+      if (typeof v === 'string') out[f] = v
+      else out[f] = Math.round((v as number) * 100) / 100
+    }
   }
   return out
 }
@@ -185,7 +228,6 @@ export default function HealthImportPage() {
       setPhase('error'); return
     }
     try {
-      // Step 1: read zip
       setPhase('reading'); setProgress(3); setLabel('Reading ZIP…')
       const JSZip = (await import('jszip')).default
       const ab = await file.arrayBuffer()
@@ -195,20 +237,19 @@ export default function HealthImportPage() {
       if (!xmlEntry) throw new Error('No export.xml found in the ZIP. Export from Health app → Profile → Export All Health Data.')
       setProgress(12); setLabel(`Decompressing ${xmlEntry.name}…`)
 
-      // Step 2: stream as Uint8Array (avoids single-string memory issue on 600MB+ files)
       setPhase('parsing')
       const xmlBuf = await xmlEntry.async('arraybuffer')
       const uint8 = new Uint8Array(xmlBuf)
       const totalBytes = uint8.byteLength
       const decoder = new TextDecoder('utf-8')
-      const CHUNK = 4 * 1024 * 1024 // 4 MB per chunk
+      const CHUNK = 4 * 1024 * 1024
 
-      // 30-day cutoff
       const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30)
       const cutoffStr = cutoff.toISOString().substring(0, 10)
 
       const dayMap = new Map<string, DailyRecord>()
-      const sleepIntervals: [Date, Date, string][] = []
+      // Collect sleep intervals per date for proper merging
+      const sleepByDate = new Map<string, SleepInterval[]>()
       const workouts: WorkoutRecord[] = []
 
       let leftover = ''
@@ -230,7 +271,6 @@ export default function HealthImportPage() {
           const t = xmlLine.trim()
           if (!t) continue
 
-          // ── Workout multi-line tracking ──
           if (inWorkout) {
             workoutBuf += t + '\n'
             if (t === '</Workout>' || t.startsWith('</Workout>')) {
@@ -247,10 +287,8 @@ export default function HealthImportPage() {
             continue
           }
 
-          // ── Only process Record & ActivitySummary ──
           if (!t.startsWith('<Record') && !t.startsWith('<ActivitySummary')) continue
 
-          // ── ActivitySummary ──
           if (t.startsWith('<ActivitySummary')) {
             const dcM = RX_DCMP.exec(t); if (!dcM || dcM[1] < cutoffStr) continue
             const day = getOrCreate(dayMap, dcM[1])
@@ -260,18 +298,24 @@ export default function HealthImportPage() {
             continue
           }
 
-          // ── Record ──
           const typeM = RX_TYPE.exec(t); if (!typeM) continue
           const type = typeM[1]
 
-          // ── Sleep ──
-          if (type === 'HKCategoryTypeIdentifierSleepAnalysis') {
-            const valM = RX_VALUE.exec(t); if (!valM) continue
-            if (!ASLEEP_SET.has(valM[1])) continue
+          // ── Sleep — collect intervals for merge later ──
+          const sleepStage = SLEEP_STAGE_MAP[type]
+          if (sleepStage !== undefined) {
+            const valM = RX_VALUE.exec(t)
+            // For sleep records the value field may not be present — the type itself encodes the stage
             const sM = RX_START.exec(t); const eM = RX_END.exec(t)
             if (!sM || !eM) continue
-            if (sM[1].substring(0, 10) < cutoffStr && eM[1].substring(0, 10) < cutoffStr) continue
-            sleepIntervals.push([new Date(sM[1]), new Date(eM[1]), valM[1]])
+            const start = new Date(sM[1]), end = new Date(eM[1])
+            if (end <= start) continue
+            // Use the wake date (end date) to attribute to the night
+            const wakeDate = end.toISOString().substring(0, 10)
+            if (wakeDate < cutoffStr) continue
+            const arr = sleepByDate.get(wakeDate) ?? []
+            arr.push({ start, end, stage: sleepStage })
+            sleepByDate.set(wakeDate, arr)
             continue
           }
 
@@ -292,21 +336,20 @@ export default function HealthImportPage() {
         await new Promise(r => setTimeout(r, 0))
       }
 
-      // Step 3: aggregate sleep
+      // ── Aggregate sleep using interval merging (fixes double-counting) ──
       setProgress(71); setLabel('Computing sleep stages…')
-      for (const [start, end, sleepType] of sleepIntervals) {
-        if (end <= start) continue
-        const dh = (end.getTime() - start.getTime()) / 3_600_000
-        const date = end.toISOString().substring(0, 10)
-        if (date < cutoffStr) continue
+      for (const [date, intervals] of sleepByDate) {
+        const agg = aggregateSleep(intervals)
+        if (!agg) continue
         const day = getOrCreate(dayMap, date)
-        day.sleepHours = ((day.sleepHours as number | undefined) ?? 0) + dh
-        if (sleepType === 'HKCategoryValueSleepAnalysisAsleepDeep') day.sleepDeep = ((day.sleepDeep as number | undefined) ?? 0) + dh
-        if (sleepType === 'HKCategoryValueSleepAnalysisAsleepREM')  day.sleepRem  = ((day.sleepRem  as number | undefined) ?? 0) + dh
-        if (sleepType === 'HKCategoryValueSleepAnalysisAsleepCore') day.sleepCore = ((day.sleepCore as number | undefined) ?? 0) + dh
+        day.sleepHours = Math.round(agg.totalH * 100) / 100
+        if (agg.deepH > 0) day.sleepDeep = Math.round(agg.deepH * 100) / 100
+        if (agg.remH  > 0) day.sleepRem  = Math.round(agg.remH  * 100) / 100
+        if (agg.coreH > 0) day.sleepCore = Math.round(agg.coreH * 100) / 100
+        day.sleepStart = agg.firstStart
+        day.sleepEnd   = agg.lastEnd
       }
 
-      // Step 4: finalize days
       setProgress(73); setLabel('Finalizing records…')
       const syncedAt = new Date().toISOString()
       const finalDays = Array.from(dayMap.values())
@@ -314,14 +357,12 @@ export default function HealthImportPage() {
         .filter(d => Object.keys(d).length > 1)
         .sort((a, b) => String(a.date).localeCompare(String(b.date)))
 
-      // Step 5: write directly to Firestore (client-side with auth — no server needed)
       setPhase('uploading')
       const healthPath = `users/${user.uid}/health_logs`
       const workoutPath = `users/${user.uid}/workout_logs`
 
       setProgress(75); setLabel(`Saving ${finalDays.length} days to Firestore…`)
 
-      // Write health records — all at once with allSettled
       const dayResults = await Promise.allSettled(
         finalDays.map(day =>
           setDocument(healthPath, String(day.date), { ...day, syncedAt })
@@ -331,12 +372,11 @@ export default function HealthImportPage() {
       const dayFail = dayResults.filter(r => r.status === 'rejected').length
       if (dayFail > 0) {
         const firstErr = dayResults.find(r => r.status === 'rejected') as PromiseRejectedResult
-        console.error('Health write error (first):', firstErr.reason)
+        console.error('Health write error:', firstErr.reason)
       }
 
       setProgress(88); setLabel(`Saving ${workouts.length} workouts…`)
 
-      // Write workouts
       const wktResults = await Promise.allSettled(
         workouts.map(w => {
           const safeStart = w.startDate.replace(/[^0-9]/g, '').substring(0, 14)
@@ -349,15 +389,10 @@ export default function HealthImportPage() {
           })
         })
       )
-      const wktOk   = wktResults.filter(r => r.status === 'fulfilled').length
-      const wktFail = wktResults.filter(r => r.status === 'rejected').length
-      if (wktFail > 0) {
-        const firstErr = wktResults.find(r => r.status === 'rejected') as PromiseRejectedResult
-        console.error('Workout write error (first):', firstErr.reason)
-      }
+      const wktOk = wktResults.filter(r => r.status === 'fulfilled').length
 
       if (dayOk === 0 && finalDays.length > 0) {
-        throw new Error(`All ${finalDays.length} day records failed to save. Check Firestore rules or network.`)
+        throw new Error(`All ${finalDays.length} day records failed to save. Check your connection or Firestore permissions.`)
       }
 
       setResult({
@@ -388,7 +423,6 @@ export default function HealthImportPage() {
         </p>
       </div>
 
-      {/* How to export */}
       <div style={{ background: 'rgba(20,184,166,0.07)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 12, padding: '0.9rem', marginBottom: '1rem' }}>
         <p style={{ fontWeight: 700, fontSize: '0.83rem', margin: '0 0 0.4rem' }}>📱 How to export from iPhone:</p>
         <ol style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -399,7 +433,6 @@ export default function HealthImportPage() {
         </ol>
       </div>
 
-      {/* Drop zone */}
       {phase === 'idle' && (
         <div
           onDrop={e => { e.preventDefault(); setIsDragOver(false); const f = e.dataTransfer.files[0]; if (f) processFile(f) }}
@@ -420,7 +453,6 @@ export default function HealthImportPage() {
         </div>
       )}
 
-      {/* Progress */}
       {isActive && (
         <div className="card" style={{ border: '1px solid rgba(20,184,166,0.2)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.85rem' }}>
@@ -440,7 +472,6 @@ export default function HealthImportPage() {
         </div>
       )}
 
-      {/* Done */}
       {phase === 'done' && result && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           <div className="card" style={{ border: '1px solid rgba(16,185,129,0.3)', background: 'rgba(16,185,129,0.04)' }}>
@@ -463,7 +494,6 @@ export default function HealthImportPage() {
               ))}
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
-              {/* Hard redirect — bypasses Next.js page cache so fresh data loads */}
               <button
                 onClick={() => { window.location.href = '/health' }}
                 style={{ flex: 1, background: '#14b8a6', color: '#fff', border: 'none', borderRadius: 8, padding: '0.6rem', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer' }}
@@ -482,7 +512,6 @@ export default function HealthImportPage() {
         </div>
       )}
 
-      {/* Error */}
       {phase === 'error' && (
         <div className="card" style={{ border: '1px solid rgba(239,68,68,0.3)' }}>
           <p style={{ fontWeight: 700, color: '#ef4444' }}>❌ {errMsg}</p>

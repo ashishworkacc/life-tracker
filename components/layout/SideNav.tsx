@@ -22,8 +22,6 @@ const NAV_SECTIONS = [
     items: [
       { href: '/health',          icon: '🍎', label: 'Health Hub' },
       { href: '/trackers/food',   icon: '🥗', label: 'Food Log' },
-      { href: '/trackers/sleep',  icon: '💤', label: 'Sleep' },
-      { href: '/trackers/weight', icon: '⚖️', label: 'Weight' },
       { href: '/trackers/vitals', icon: '💊', label: 'Vitals & Meds' },
       { href: '/cravings',        icon: '⚠️', label: 'Cravings' },
     ],
