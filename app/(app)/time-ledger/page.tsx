@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { setDocument, queryDocuments, where } from '@/lib/firebase/db'
 
@@ -29,19 +29,17 @@ for (let h = 0; h < 24; h++) {
 }
 
 const CLASS_META = {
-  'high-yield':  { label: 'High Yield',  color: '#10b981', bg: 'rgba(16,185,129,0.12)',  icon: '🔥' },
-  'maintenance': { label: 'Maintenance', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  icon: '⚙️' },
-  'mediocre':    { label: 'Mediocre',    color: '#ef4444', bg: 'rgba(239,68,68,0.12)',   icon: '💀' },
+  'high-yield':  { label: 'High Yield',  color: '#10b981', bg: 'rgba(16,185,129,0.12)', icon: '🔥' },
+  'maintenance': { label: 'Maintenance', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', icon: '⚙️' },
+  'mediocre':    { label: 'Mediocre',    color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  icon: '💀' },
 } as const
 
 function dateStr(d: Date) { return d.toISOString().split('T')[0] }
 function addDays(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate() + n); return r }
 function isCurrentSlot(slot: string) {
-  const now = new Date()
-  const h = now.getHours(), m = now.getMinutes()
+  const now = new Date(), h = now.getHours(), m = now.getMinutes()
   const [sh, sm] = slot.split(':').map(Number)
-  const slotMin = sh * 60 + sm
-  const nowMin  = h  * 60 + m
+  const slotMin = sh * 60 + sm, nowMin = h * 60 + m
   return nowMin >= slotMin && nowMin < slotMin + 30
 }
 function isPastSlot(slot: string) {
@@ -50,27 +48,132 @@ function isPastSlot(slot: string) {
   return now.getHours() * 60 + now.getMinutes() > sh * 60 + sm
 }
 
+// ─── SlotRow — defined OUTSIDE parent so its identity is stable ───────────────
+interface SlotRowProps {
+  slot: string
+  block: Block | undefined
+  ghost: string | undefined
+  isActive: boolean
+  isToday: boolean
+  isPast: boolean
+  isSaving: boolean
+  onActivate: (slot: string) => void
+  onDeactivate: () => void
+  onUpdate: (slot: string, entry: string) => void
+}
+
+const SlotRow = memo(function SlotRow({
+  slot, block, ghost, isActive, isToday, isPast, isSaving,
+  onActivate, onDeactivate, onUpdate,
+}: SlotRowProps) {
+  const entry = block?.entry ?? ''
+  const cls   = block?.classification ?? null
+  const isCurrent = isToday && isCurrentSlot(slot)
+  const meta  = cls ? CLASS_META[cls] : null
+
+  // Local textarea state — prevents cursor-reset on parent re-renders
+  const [localValue, setLocalValue] = useState(entry)
+  const isActiveRef = useRef(isActive)
+  isActiveRef.current = isActive
+
+  // Sync external entry changes into local state (e.g. after AI analysis)
+  useEffect(() => {
+    if (!isActiveRef.current) setLocalValue(entry)
+  }, [entry])
+
+  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const val = e.target.value
+    setLocalValue(val)
+    onUpdate(slot, val)
+  }
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: '0.5rem',
+      padding: '0.3rem 0.5rem', borderRadius: 8, transition: 'background 0.2s',
+      background: isCurrent ? 'rgba(20,184,166,0.08)' : cls ? meta!.bg : 'transparent',
+      border: isCurrent ? '1px solid rgba(20,184,166,0.3)' : '1px solid transparent',
+    }}>
+      {/* Time label */}
+      <div style={{
+        width: 40, flexShrink: 0, paddingTop: '0.4rem',
+        fontSize: '0.65rem', fontFamily: 'monospace',
+        color: isCurrent ? '#14b8a6' : 'var(--text-muted)',
+        fontWeight: isCurrent ? 800 : 500,
+      }}>
+        {slot}
+        {isCurrent && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#14b8a6', marginTop: 2 }} />}
+      </div>
+
+      {/* Input */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {isActive ? (
+          <textarea
+            autoFocus
+            value={localValue}
+            onChange={handleChange}
+            onBlur={() => { onUpdate(slot, localValue); onDeactivate() }}
+            placeholder={ghost ? `Typically: ${ghost}` : 'What did you do here?'}
+            rows={2}
+            style={{
+              width: '100%', padding: '0.4rem 0.6rem', borderRadius: 8, fontSize: '0.78rem',
+              border: `1px solid ${meta?.color ?? '#14b8a6'}`,
+              background: 'var(--surface-2)', color: 'var(--text-primary)',
+              resize: 'none', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
+            }}
+          />
+        ) : (
+          <div
+            onClick={() => onActivate(slot)}
+            style={{
+              minHeight: 28, padding: '0.35rem 0.5rem', borderRadius: 8, cursor: 'text',
+              fontSize: '0.78rem',
+              color: entry ? (meta?.color ?? 'var(--text-primary)') : 'var(--text-muted)',
+              fontStyle: entry ? 'normal' : 'italic',
+            }}
+          >
+            {entry || (ghost
+              ? <span style={{ opacity: 0.35 }}>Typically: {ghost}</span>
+              : isPast ? <span style={{ opacity: 0.25 }}>— backfill this block</span> : null
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Classification badge */}
+      {cls && (
+        <div style={{ flexShrink: 0, paddingTop: '0.35rem', fontSize: '0.65rem', fontWeight: 700, color: meta!.color }}>
+          {meta!.icon}
+        </div>
+      )}
+      {isSaving && (
+        <div style={{ flexShrink: 0, paddingTop: '0.4rem', fontSize: '0.6rem', color: 'var(--text-muted)' }}>…</div>
+      )}
+    </div>
+  )
+})
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function TimeLedgerPage() {
   const { user } = useAuth()
   const todayStr = dateStr(new Date())
 
   const [selectedDate, setSelectedDate] = useState(todayStr)
-  const [days, setDays] = useState<Record<string, DayData>>({})
-  const [ghostMap, setGhostMap] = useState<Record<string, string>>({}) // slot → most common past entry
+  const [days, setDays]       = useState<Record<string, DayData>>({})
+  const [ghostMap, setGhostMap] = useState<Record<string, string>>({})
   const [analyzing, setAnalyzing] = useState(false)
   const [activeSlot, setActiveSlot] = useState<string | null>(null)
-  const [saving, setSaving] = useState<string | null>(null)
+  const [saving, setSaving]   = useState<string | null>(null)
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const daysRef = useRef(days)
+  daysRef.current = days
 
-  const dayData: DayData = days[selectedDate] ?? { blocks: {}, mediocreScore: null, status: null }
   const isToday = selectedDate === todayStr
 
   useEffect(() => { if (user) loadData() }, [user])
 
   async function loadData() {
     if (!user) return
-    // Load last 14 days of ledger data for ghost fills
     const cutoff = dateStr(addDays(new Date(), -14))
     const docs = await queryDocuments('time_ledger', [where('userId', '==', user.uid)])
     const loaded: Record<string, DayData> = {}
@@ -85,7 +188,6 @@ export default function TimeLedgerPage() {
         verdict: doc.verdict,
         analyzedAt: doc.analyzedAt,
       }
-      // Build ghost map from past days
       if (doc.date < todayStr && doc.date >= cutoff) {
         const blocks = (doc.blocks as Record<string, Block>) ?? {}
         for (const [slot, block] of Object.entries(blocks)) {
@@ -97,113 +199,104 @@ export default function TimeLedgerPage() {
       }
     }
 
-    // Ghost = most common entry per slot
     const ghost: Record<string, string> = {}
     for (const [slot, freq] of Object.entries(slotFreq)) {
       const top = Object.entries(freq).sort((a, b) => b[1] - a[1])[0]
-      if (top && top[1] >= 2) ghost[slot] = top[0] // only suggest if seen ≥2 times
+      if (top && top[1] >= 2) ghost[slot] = top[0]
     }
 
     setDays(loaded)
     setGhostMap(ghost)
   }
 
-  // Debounced save of a single block
-  const saveBlock = useCallback(async (slot: string, block: Block) => {
+  // Stable callbacks passed to SlotRow — won't cause remount
+  const handleActivate = useCallback((slot: string) => setActiveSlot(slot), [])
+  const handleDeactivate = useCallback(() => setActiveSlot(null), [])
+
+  const handleUpdate = useCallback((slot: string, entry: string) => {
     if (!user) return
+
+    // Update local state immediately (no remount — SlotRow manages its own display)
+    setDays(prev => {
+      const cur = prev[selectedDate]?.blocks ?? {}
+      return {
+        ...prev,
+        [selectedDate]: {
+          ...prev[selectedDate],
+          blocks: {
+            ...cur,
+            [slot]: {
+              entry,
+              classification: cur[slot]?.classification ?? null,
+              note: cur[slot]?.note,
+            },
+          },
+        },
+      }
+    })
+
+    // Debounced Firestore save
     clearTimeout(saveTimers.current[slot])
     saveTimers.current[slot] = setTimeout(async () => {
+      if (!entry.trim()) return
       setSaving(slot)
+      const daySnap = daysRef.current[selectedDate]
+      const curBlocks = daySnap?.blocks ?? {}
+      const updatedBlocks = {
+        ...curBlocks,
+        [slot]: { entry, classification: curBlocks[slot]?.classification ?? null, note: curBlocks[slot]?.note },
+      }
       const docId = `${user.uid}_${selectedDate}`
-      const current = days[selectedDate]?.blocks ?? {}
-      const updated = { ...current, [slot]: block }
       await setDocument('time_ledger', docId, {
-        userId: user.uid,
-        date: selectedDate,
-        blocks: updated,
-        mediocreScore: days[selectedDate]?.mediocreScore ?? null,
-        status: days[selectedDate]?.status ?? null,
-        verdict: days[selectedDate]?.verdict ?? null,
-        analyzedAt: days[selectedDate]?.analyzedAt ?? null,
+        userId: user.uid, date: selectedDate,
+        blocks: updatedBlocks,
+        mediocreScore: daySnap?.mediocreScore ?? null,
+        status: daySnap?.status ?? null,
+        verdict: daySnap?.verdict ?? null,
+        analyzedAt: daySnap?.analyzedAt ?? null,
       })
-      setDays(prev => ({
-        ...prev,
-        [selectedDate]: { ...prev[selectedDate], blocks: updated },
-      }))
       setSaving(null)
-    }, 800)
-  }, [user, selectedDate, days])
-
-  function updateBlock(slot: string, entry: string) {
-    const block: Block = {
-      entry,
-      classification: days[selectedDate]?.blocks?.[slot]?.classification ?? null,
-      note: days[selectedDate]?.blocks?.[slot]?.note,
-    }
-    setDays(prev => ({
-      ...prev,
-      [selectedDate]: {
-        ...prev[selectedDate],
-        blocks: { ...(prev[selectedDate]?.blocks ?? {}), [slot]: block },
-      },
-    }))
-    if (entry.trim()) saveBlock(slot, block)
-  }
+    }, 1000)
+  }, [user, selectedDate])
 
   async function analyzeDay() {
     if (!user) return
-    const filled = Object.entries(dayData.blocks)
+    const dayData = days[selectedDate]
+    const filled = Object.entries(dayData?.blocks ?? {})
       .filter(([, b]) => b.entry?.trim())
       .map(([slot, b]) => ({ slot, entry: b.entry }))
-    if (filled.length < 3) {
-      alert('Fill in at least 3 time blocks before analyzing.')
-      return
-    }
+    if (filled.length < 3) { alert('Fill in at least 3 time blocks before analyzing.'); return }
+
     setAnalyzing(true)
     try {
       const res = await fetch('/api/ai/time-ledger-analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blocks: filled }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      // Merge classifications back
-      const updatedBlocks = { ...(dayData.blocks ?? {}) }
+      const updatedBlocks = { ...(dayData?.blocks ?? {}) }
       for (const r of data.results ?? []) {
         if (updatedBlocks[r.slot]) {
           updatedBlocks[r.slot] = { ...updatedBlocks[r.slot], classification: r.classification, note: r.note }
         }
       }
-
       const docId = `${user.uid}_${selectedDate}`
       await setDocument('time_ledger', docId, {
-        userId: user.uid,
-        date: selectedDate,
-        blocks: updatedBlocks,
-        mediocreScore: data.mediocreScore ?? null,
-        status: data.status ?? null,
-        verdict: data.verdict ?? null,
-        analyzedAt: new Date().toISOString(),
+        userId: user.uid, date: selectedDate, blocks: updatedBlocks,
+        mediocreScore: data.mediocreScore ?? null, status: data.status ?? null,
+        verdict: data.verdict ?? null, analyzedAt: new Date().toISOString(),
       })
       setDays(prev => ({
         ...prev,
-        [selectedDate]: {
-          blocks: updatedBlocks,
-          mediocreScore: data.mediocreScore,
-          status: data.status,
-          verdict: data.verdict,
-          analyzedAt: new Date().toISOString(),
-        },
+        [selectedDate]: { blocks: updatedBlocks, mediocreScore: data.mediocreScore, status: data.status, verdict: data.verdict, analyzedAt: new Date().toISOString() },
       }))
-    } catch (e: any) {
-      alert('Analysis failed: ' + e.message)
-    }
+    } catch (e: any) { alert('Analysis failed: ' + e.message) }
     setAnalyzing(false)
   }
 
-  // ─── Stats ────────────────────────────────────────────────────────────────
+  const dayData: DayData = days[selectedDate] ?? { blocks: {}, mediocreScore: null, status: null }
   const allBlocks = Object.values(dayData.blocks ?? {}).filter(b => b.entry?.trim())
   const analyzed  = allBlocks.filter(b => b.classification)
   const highYield = analyzed.filter(b => b.classification === 'high-yield').length
@@ -218,94 +311,8 @@ export default function TimeLedgerPage() {
     ? { label: '✅ SOLID DAY', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' }
     : null
 
-  // Group slots into AM/PM sections
   const amSlots = SLOTS.filter(s => parseInt(s) < 12)
   const pmSlots = SLOTS.filter(s => parseInt(s) >= 12)
-
-  function SlotRow({ slot }: { slot: string }) {
-    const block = dayData.blocks?.[slot]
-    const entry = block?.entry ?? ''
-    const cls   = block?.classification
-    const isActive = activeSlot === slot
-    const isCurrent = isToday && isCurrentSlot(slot)
-    const isPast    = isToday ? isPastSlot(slot) : selectedDate < todayStr
-    const ghost = !entry && ghostMap[slot]
-    const meta  = cls ? CLASS_META[cls] : null
-
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'flex-start', gap: '0.5rem',
-        padding: '0.3rem 0.5rem',
-        borderRadius: 8,
-        background: isCurrent ? 'rgba(20,184,166,0.08)' : cls ? meta!.bg : 'transparent',
-        border: isCurrent ? '1px solid rgba(20,184,166,0.3)' : '1px solid transparent',
-        transition: 'background 0.2s',
-      }}>
-        {/* Time label */}
-        <div style={{
-          width: 40, flexShrink: 0, paddingTop: '0.4rem',
-          fontSize: '0.65rem', color: isCurrent ? '#14b8a6' : 'var(--text-muted)',
-          fontWeight: isCurrent ? 800 : 500,
-          fontFamily: 'monospace',
-        }}>
-          {slot}
-          {isCurrent && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#14b8a6', marginTop: 2 }} />}
-        </div>
-
-        {/* Input */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {isActive ? (
-            <textarea
-              autoFocus
-              value={entry}
-              onChange={e => updateBlock(slot, e.target.value)}
-              onBlur={() => setActiveSlot(null)}
-              placeholder={ghost ? `Typically: ${ghost}` : 'What did you do here?'}
-              rows={2}
-              style={{
-                width: '100%', padding: '0.4rem 0.6rem', borderRadius: 8, fontSize: '0.78rem',
-                border: `1px solid ${meta?.color ?? '#14b8a6'}`,
-                background: 'var(--surface-2)', color: 'var(--text-primary)',
-                resize: 'none', outline: 'none', boxSizing: 'border-box',
-                fontFamily: 'inherit',
-              }}
-            />
-          ) : (
-            <div
-              onClick={() => setActiveSlot(slot)}
-              style={{
-                minHeight: 28, padding: '0.35rem 0.5rem', borderRadius: 8, cursor: 'text',
-                fontSize: '0.78rem',
-                color: entry ? (meta?.color ?? 'var(--text-primary)') : 'var(--text-muted)',
-                fontStyle: entry ? 'normal' : 'italic',
-                background: 'transparent',
-              }}
-            >
-              {entry || (ghost ? (
-                <span style={{ opacity: 0.35 }}>Typically: {ghost}</span>
-              ) : (
-                isPast ? <span style={{ opacity: 0.25 }}>— backfill this block</span> : null
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Classification badge */}
-        {cls && (
-          <div style={{
-            flexShrink: 0, paddingTop: '0.35rem',
-            fontSize: '0.62rem', fontWeight: 700, color: meta!.color,
-            textTransform: 'uppercase', letterSpacing: '0.03em',
-          }}>
-            {meta!.icon}
-          </div>
-        )}
-        {saving === slot && (
-          <div style={{ flexShrink: 0, paddingTop: '0.4rem', fontSize: '0.6rem', color: 'var(--text-muted)' }}>…</div>
-        )}
-      </div>
-    )
-  }
 
   return (
     <div style={{ maxWidth: 700, margin: '0 auto', padding: '1rem 1rem 8rem' }}>
@@ -350,7 +357,7 @@ export default function TimeLedgerPage() {
             <span style={{ fontWeight: 800, color: statusMeta.color, fontSize: '0.9rem' }}>{statusMeta.label}</span>
             {dayData.mediocreScore !== null && (
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                Mediocre score: <strong style={{ color: dayData.mediocreScore > 40 ? '#ef4444' : '#10b981' }}>{dayData.mediocreScore}%</strong>
+                Mediocre: <strong style={{ color: dayData.mediocreScore > 40 ? '#ef4444' : '#10b981' }}>{dayData.mediocreScore}%</strong>
               </span>
             )}
           </div>
@@ -358,56 +365,79 @@ export default function TimeLedgerPage() {
         </div>
       )}
 
-      {/* Stats row */}
+      {/* Stats */}
       {analyzed.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.4rem', marginBottom: '0.85rem' }}>
           {[
             { label: '🔥 High Yield', val: highYield, color: '#10b981' },
-            { label: '⚙️ Maintenance', val: mainten, color: '#f59e0b' },
-            { label: '💀 Mediocre', val: mediocre, color: '#ef4444' },
+            { label: '⚙️ Maintenance', val: mainten,  color: '#f59e0b' },
+            { label: '💀 Mediocre',   val: mediocre,  color: '#ef4444' },
           ].map(s => (
             <div key={s.label} style={{ background: 'var(--surface)', border: `1px solid ${s.color}20`, borderRadius: 10, padding: '0.5rem', textAlign: 'center' }}>
               <p style={{ fontSize: '0.6rem', color: 'var(--text-muted)', margin: '0 0 0.15rem' }}>{s.label}</p>
               <p style={{ fontSize: '1.2rem', fontWeight: 800, color: s.color, margin: 0 }}>{s.val}</p>
-              <p style={{ fontSize: '0.58rem', color: 'var(--text-muted)', margin: 0 }}>blocks · {Math.round(s.val * 30 / 60 * 10) / 10}h</p>
+              <p style={{ fontSize: '0.58rem', color: 'var(--text-muted)', margin: 0 }}>{Math.round(s.val * 0.5 * 10) / 10}h</p>
             </div>
           ))}
         </div>
       )}
 
-      {/* Progress bar of day */}
+      {/* Day progress bar */}
       {isToday && (() => {
-        const now = new Date()
-        const nowMin = now.getHours() * 60 + now.getMinutes()
+        const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes()
         const pct = Math.round((nowMin / 1440) * 100)
         const filled = Math.round((allBlocks.length / 48) * 100)
         return (
           <div style={{ marginBottom: '0.85rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-              <span>Day progress: {pct}%</span>
-              <span>Blocks filled: {allBlocks.length}/48 ({filled}%)</span>
+              <span>Day elapsed: {pct}%</span>
+              <span>Blocks filled: {allBlocks.length}/48</span>
             </div>
             <div style={{ height: 6, background: 'var(--surface-2)', borderRadius: 99, overflow: 'hidden', position: 'relative' }}>
-              <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: 'rgba(99,102,241,0.3)', borderRadius: 99 }} />
+              <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: 'rgba(99,102,241,0.25)', borderRadius: 99 }} />
               <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${filled}%`, background: '#14b8a6', borderRadius: 99, opacity: 0.8 }} />
             </div>
           </div>
         )
       })()}
 
-      {/* AM section */}
+      {/* AM grid */}
       <div className="card" style={{ padding: '0.5rem', marginBottom: '0.5rem' }}>
         <p style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.3rem 0.5rem' }}>🌅 AM</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-          {amSlots.map(slot => <SlotRow key={slot} slot={slot} />)}
+          {amSlots.map(slot => (
+            <SlotRow key={slot} slot={slot}
+              block={dayData.blocks?.[slot]}
+              ghost={ghostMap[slot]}
+              isActive={activeSlot === slot}
+              isToday={isToday}
+              isPast={isToday ? isPastSlot(slot) : selectedDate < todayStr}
+              isSaving={saving === slot}
+              onActivate={handleActivate}
+              onDeactivate={handleDeactivate}
+              onUpdate={handleUpdate}
+            />
+          ))}
         </div>
       </div>
 
-      {/* PM section */}
+      {/* PM grid */}
       <div className="card" style={{ padding: '0.5rem', marginBottom: '1rem' }}>
         <p style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.3rem 0.5rem' }}>🌙 PM</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-          {pmSlots.map(slot => <SlotRow key={slot} slot={slot} />)}
+          {pmSlots.map(slot => (
+            <SlotRow key={slot} slot={slot}
+              block={dayData.blocks?.[slot]}
+              ghost={ghostMap[slot]}
+              isActive={activeSlot === slot}
+              isToday={isToday}
+              isPast={isToday ? isPastSlot(slot) : selectedDate < todayStr}
+              isSaving={saving === slot}
+              onActivate={handleActivate}
+              onDeactivate={handleDeactivate}
+              onUpdate={handleUpdate}
+            />
+          ))}
         </div>
       </div>
 
@@ -419,10 +449,6 @@ export default function TimeLedgerPage() {
             {m.label}
           </div>
         ))}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(99,102,241,0.4)' }} />
-          Ghost (your pattern)
-        </div>
       </div>
     </div>
   )
