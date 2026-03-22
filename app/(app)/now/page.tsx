@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuth } from '@/lib/hooks/useAuth'
-import { addDocument, queryDocuments, todayDate, where, orderBy, limit } from '@/lib/firebase/db'
+import { addDocument, queryDocuments, setDocument, todayDate, where, orderBy, limit } from '@/lib/firebase/db'
 
 const FOCUS_PRESETS = [25, 30, 45, 60]
 const SHORT_BREAK_PRESETS = [5, 10]
@@ -242,6 +242,19 @@ export default function PomodoroPage() {
     setBreakdowns([])
     startTimeRef.current = Date.now()
     if (soundEnabled) playBeep(440, 0.3)
+
+    // Sync to current Time Ledger block (silent — non-blocking)
+    if (user) {
+      const now = new Date()
+      const h  = String(now.getHours()).padStart(2, '0')
+      const sm = now.getMinutes() < 30 ? '00' : '30'
+      const slot = `${h}:${sm}`
+      const docId = `${user.uid}_${today}`
+      setDocument('time_ledger', docId, {
+        userId: user.uid, date: today,
+        blocks: { [slot]: { entry: `🍅 ${taskToStart.title}`, classification: null, note: 'Pomodoro' } },
+      }, { merge: true }).catch(() => {/* silent */})
+    }
   }
 
   async function handleDone() {

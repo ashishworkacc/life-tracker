@@ -5,10 +5,11 @@ import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 
 const PRIMARY_NAV = [
-  { href: '/command-center', label: 'Today',   icon: '⚡' },
-  { href: '/todos',          label: 'Todos',   icon: '📋' },
-  { href: '/habits',         label: 'Habits',  icon: '✅' },
-  { href: '/counters',       label: 'Count',   icon: '🔢' },
+  { href: '/command-center', label: 'Today',  icon: '⚡' },
+  { href: '/todos',          label: 'Todos',  icon: '📋' },
+  { href: '/habits',         label: 'Habits', icon: '✅' },
+  { href: '/time-ledger',    label: 'Time',   icon: '🕐' },
+  { href: '/counters',       label: 'Count',  icon: '🔢' },
 ]
 
 const MORE_SECTIONS = [

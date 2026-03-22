@@ -129,16 +129,18 @@ export default function SideNav() {
       {/* Footer: XP + dark mode */}
       <div className="flex-shrink-0 px-3 py-3 space-y-1" style={{ borderTop: '1px solid var(--border)' }}>
         {xp && (
-          <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl mb-1"
-            style={{ background: 'rgba(168,85,247,0.08)' }}>
+          <Link href="/gamification"
+            className="flex items-center gap-2.5 px-3 py-2 rounded-xl mb-1 transition-all hover:opacity-80 active:scale-95"
+            style={{ background: 'rgba(168,85,247,0.08)', textDecoration: 'none', cursor: 'pointer' }}>
             <span className="text-sm">🏆</span>
-            <div>
+            <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold" style={{ color: '#a855f7' }}>Level {xp.level}</p>
               {xp.xpToday > 0 && (
                 <p className="text-[10px]" style={{ color: 'var(--muted)' }}>+{xp.xpToday} XP today</p>
               )}
             </div>
-          </div>
+            <span className="text-[10px]" style={{ color: 'var(--muted)' }}>→</span>
+          </Link>
         )}
         <button
           onClick={toggle}

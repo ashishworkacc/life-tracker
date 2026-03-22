@@ -103,19 +103,29 @@ export default function GamificationPage() {
   const [loading, setLoading]   = useState(true)
   const [tab, setTab]           = useState<'character' | 'history' | 'guide'>('character')
   const [toggling, setToggling] = useState(false)
+  // Coin system: 1 coin per 5 XP. Spendable on vices/rewards.
+  const [rewards, setRewards]   = useState<{id: string; title: string; cost: number; redeemed: boolean}[]>([])
+  const [spentCoins, setSpentCoins] = useState(0)
+  const [showAddReward, setShowAddReward] = useState(false)
+  const [newRewardTitle, setNewRewardTitle] = useState('')
+  const [newRewardCost, setNewRewardCost] = useState('50')
 
   useEffect(() => { if (user) load() }, [user])
 
   async function load() {
     if (!user) return
-    const [xpDocs, badgeDocs, eventDocs, statsDocs, habitLogDocs, habitDocs] = await Promise.all([
+    const [xpDocs, badgeDocs, eventDocs, statsDocs, habitLogDocs, habitDocs, rewardDocs] = await Promise.all([
       queryDocuments('user_xp', [where('userId', '==', user.uid)]),
       queryDocuments('badges', [where('userId', '==', user.uid), orderBy('earnedAt', 'desc')]),
       queryDocuments('xp_events', [where('userId', '==', user.uid), orderBy('date', 'desc')]),
       queryDocuments('player_stats', [where('userId', '==', user.uid)]),
       queryDocuments('daily_habit_logs', [where('userId', '==', user.uid), where('date', '==', today)]),
       queryDocuments('habits', [where('userId', '==', user.uid), where('isActive', '==', true)]),
+      queryDocuments('player_rewards', [where('userId', '==', user.uid)]),
     ])
+    const loadedRewards = rewardDocs.map((r: any) => ({ id: r.id, title: r.title, cost: r.cost ?? 50, redeemed: r.redeemed ?? false }))
+    setRewards(loadedRewards)
+    setSpentCoins(loadedRewards.filter((r: any) => r.redeemed).reduce((s: number, r: any) => s + r.cost, 0))
 
     const computed = eventDocs.reduce((s, e) => s + (e.xpEarned ?? 0), 0)
     setTotalXP(computed)
@@ -183,6 +193,23 @@ export default function GamificationPage() {
   const lvlProgress = Math.min(100, (xpInLevel(totalXP) / xpForLevel(level)) * 100)
   const hpPct = Math.max(0, Math.min(100, (stats.hp / stats.maxHp) * 100))
   const cls   = playerClass(stats)
+  const totalCoins  = Math.floor(totalXP / 5)
+  const availCoins  = Math.max(0, totalCoins - spentCoins)
+
+  async function addReward() {
+    if (!user || !newRewardTitle.trim()) return
+    const cost = parseInt(newRewardCost) || 50
+    const doc = await addDocument('player_rewards', { userId: user.uid, title: newRewardTitle.trim(), cost, redeemed: false })
+    setRewards(r => [...r, { id: doc.id, title: newRewardTitle.trim(), cost, redeemed: false }])
+    setNewRewardTitle(''); setShowAddReward(false)
+  }
+
+  async function redeemReward(r: { id: string; title: string; cost: number; redeemed: boolean }) {
+    if (r.redeemed || availCoins < r.cost) return
+    await updateDocument('player_rewards', r.id, { redeemed: true })
+    setRewards(prev => prev.map(x => x.id === r.id ? { ...x, redeemed: true } : x))
+    setSpentCoins(s => s + r.cost)
+  }
 
   if (loading) return <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading…</div>
 
@@ -260,6 +287,58 @@ export default function GamificationPage() {
                 ? '🌙 Rest Day Active — No penalties · HP recovering'
                 : '🟢 Mark Today as Rest Day (pauses all penalties)'}
             </button>
+          </div>
+
+          {/* ── Coin Vault ────────────────────────────────────────────── */}
+          <div className="card" style={{ border: '1px solid rgba(234,179,8,0.3)', background: 'rgba(234,179,8,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <div>
+                <p style={{ fontSize: '0.82rem', fontWeight: 700, margin: '0 0 0.1rem', color: '#eab308' }}>🪙 Coin Vault</p>
+                <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', margin: 0 }}>Earned: {totalCoins.toLocaleString()} · Spent: {spentCoins} · <strong style={{ color: '#eab308' }}>Available: {availCoins}</strong></p>
+              </div>
+              <button onClick={() => setShowAddReward(v => !v)} style={{
+                background: '#eab308', color: '#000', border: 'none', borderRadius: 8,
+                padding: '0.3rem 0.65rem', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
+              }}>+ Reward</button>
+            </div>
+
+            {showAddReward && (
+              <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                <input value={newRewardTitle} onChange={e => setNewRewardTitle(e.target.value)}
+                  placeholder="Reward name (e.g. Cheat meal, Movie night)"
+                  style={{ flex: 1, minWidth: 160, padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: '0.78rem', outline: 'none' }} />
+                <input type="number" value={newRewardCost} onChange={e => setNewRewardCost(e.target.value)}
+                  placeholder="Cost"
+                  style={{ width: 70, padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: '0.78rem', outline: 'none' }} />
+                <button onClick={addReward} style={{ background: '#eab308', color: '#000', border: 'none', borderRadius: 8, padding: '0.45rem 0.75rem', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}>Add</button>
+              </div>
+            )}
+
+            {rewards.length === 0 ? (
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.5rem 0' }}>No rewards yet. Add something to work toward!</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                {rewards.map(r => (
+                  <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    padding: '0.45rem 0.65rem', background: 'var(--surface-2)', borderRadius: 10,
+                    opacity: r.redeemed ? 0.5 : 1 }}>
+                    <span style={{ flex: 1, fontSize: '0.8rem', textDecoration: r.redeemed ? 'line-through' : 'none' }}>{r.title}</span>
+                    <span style={{ fontSize: '0.72rem', color: '#eab308', fontWeight: 700 }}>🪙{r.cost}</span>
+                    {!r.redeemed ? (
+                      <button onClick={() => redeemReward(r)} disabled={availCoins < r.cost} style={{
+                        background: availCoins >= r.cost ? '#eab308' : 'var(--surface)',
+                        color: availCoins >= r.cost ? '#000' : 'var(--text-muted)',
+                        border: '1px solid var(--border)', borderRadius: 7,
+                        padding: '0.2rem 0.55rem', fontSize: '0.68rem', fontWeight: 700,
+                        cursor: availCoins >= r.cost ? 'pointer' : 'not-allowed',
+                      }}>Redeem</button>
+                    ) : (
+                      <span style={{ fontSize: '0.68rem', color: '#10b981', fontWeight: 700 }}>✓ Used</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Attributes */}

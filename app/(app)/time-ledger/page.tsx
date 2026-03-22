@@ -164,6 +164,8 @@ export default function TimeLedgerPage() {
   const [analyzing, setAnalyzing] = useState(false)
   const [activeSlot, setActiveSlot] = useState<string | null>(null)
   const [saving, setSaving]   = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [savedFlash, setSavedFlash] = useState(false)
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const daysRef = useRef(days)
   daysRef.current = days
@@ -240,22 +242,32 @@ export default function TimeLedgerPage() {
     saveTimers.current[slot] = setTimeout(async () => {
       if (!entry.trim()) return
       setSaving(slot)
-      const daySnap = daysRef.current[selectedDate]
-      const curBlocks = daySnap?.blocks ?? {}
-      const updatedBlocks = {
-        ...curBlocks,
-        [slot]: { entry, classification: curBlocks[slot]?.classification ?? null, note: curBlocks[slot]?.note },
+      setSaveError(null)
+      try {
+        const daySnap = daysRef.current[selectedDate]
+        const curBlocks = daySnap?.blocks ?? {}
+        const updatedBlocks = {
+          ...curBlocks,
+          [slot]: { entry, classification: curBlocks[slot]?.classification ?? null, note: curBlocks[slot]?.note },
+        }
+        const docId = `${user.uid}_${selectedDate}`
+        await setDocument('time_ledger', docId, {
+          userId: user.uid, date: selectedDate,
+          blocks: updatedBlocks,
+          mediocreScore: daySnap?.mediocreScore ?? null,
+          status: daySnap?.status ?? null,
+          verdict: daySnap?.verdict ?? null,
+          analyzedAt: daySnap?.analyzedAt ?? null,
+        })
+        setSavedFlash(true)
+        setTimeout(() => setSavedFlash(false), 1500)
+      } catch (err: any) {
+        console.error('[TimeLedger] save failed:', err)
+        setSaveError('Save failed — check connection')
+        setTimeout(() => setSaveError(null), 4000)
+      } finally {
+        setSaving(null)
       }
-      const docId = `${user.uid}_${selectedDate}`
-      await setDocument('time_ledger', docId, {
-        userId: user.uid, date: selectedDate,
-        blocks: updatedBlocks,
-        mediocreScore: daySnap?.mediocreScore ?? null,
-        status: daySnap?.status ?? null,
-        verdict: daySnap?.verdict ?? null,
-        analyzedAt: daySnap?.analyzedAt ?? null,
-      })
-      setSaving(null)
     }, 1000)
   }, [user, selectedDate])
 
@@ -317,12 +329,29 @@ export default function TimeLedgerPage() {
   return (
     <div style={{ maxWidth: 700, margin: '0 auto', padding: '1rem 1rem 8rem' }}>
 
+      {/* Save status toast */}
+      {saveError && (
+        <div style={{ position: 'fixed', top: '4.5rem', left: '50%', transform: 'translateX(-50%)', zIndex: 200,
+          background: '#ef4444', color: '#fff', borderRadius: 10, padding: '0.55rem 1rem',
+          fontSize: '0.78rem', fontWeight: 700, boxShadow: '0 4px 16px rgba(0,0,0,0.25)', whiteSpace: 'nowrap' }}>
+          ⚠️ {saveError}
+        </div>
+      )}
+      {savedFlash && !saveError && (
+        <div style={{ position: 'fixed', top: '4.5rem', left: '50%', transform: 'translateX(-50%)', zIndex: 200,
+          background: '#10b981', color: '#fff', borderRadius: 10, padding: '0.45rem 0.9rem',
+          fontSize: '0.75rem', fontWeight: 700, boxShadow: '0 4px 16px rgba(0,0,0,0.2)', whiteSpace: 'nowrap' }}>
+          ✓ Saved
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div>
           <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>🕐 Time Ledger</h1>
           <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.2rem 0 0' }}>
             48 blocks · 30 min each · {allBlocks.length} filled · {analyzed.length} analyzed
+            {saving && <span style={{ color: '#14b8a6', marginLeft: '0.4rem' }}>· saving…</span>}
           </p>
         </div>
         <button onClick={analyzeDay} disabled={analyzing || allBlocks.length < 3} style={{

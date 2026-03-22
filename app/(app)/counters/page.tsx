@@ -399,10 +399,10 @@ export default function CountersPage() {
                   <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} tickLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize: 9, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} domain={[selected.initialCount, selected.targetCount]} />
                   <Tooltip content={(p) => <ChartTip {...p} unit={selected.unit} />} />
-                  <Area dataKey="actual" stroke={selected.color} strokeWidth={2.5}
+                  <Area type="monotone" dataKey="actual" stroke={selected.color} strokeWidth={2.5}
                     fill={`url(#grad-${selected.id})`} dot={false} activeDot={{ r: 4 }}
                     connectNulls name="actual" />
-                  <Line dataKey="projected" stroke={selected.color} strokeWidth={2}
+                  <Line type="monotone" dataKey="projected" stroke={selected.color} strokeWidth={2}
                     strokeDasharray="6 4" dot={false} connectNulls name="projected" strokeOpacity={0.7} />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -498,19 +498,16 @@ export default function CountersPage() {
                 const p = pct(c)
                 return (
                   <div key={c.id} onClick={() => openDetail(c)} style={{
-                    position: 'relative', overflow: 'hidden', borderRadius: 14, cursor: 'pointer',
-                    background: 'var(--surface)', border: `1px solid ${c.color}25`,
-                    padding: '0.85rem 1rem', transition: 'transform 0.1s',
+                    position: 'relative', borderRadius: 14, cursor: 'pointer',
+                    background: p > 0
+                      ? `linear-gradient(to right, ${c.color}22 ${p}%, var(--surface) ${p}%)`
+                      : 'var(--surface)',
+                    border: `1px solid ${c.color}30`,
+                    padding: '0.85rem 1rem', transition: 'all 0.2s',
                   }}
                     onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.005)')}
                     onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
                   >
-                    {/* Fill bar */}
-                    <div style={{
-                      position: 'absolute', inset: 0, width: `${p}%`,
-                      background: `${c.color}18`, borderRadius: 14, transition: 'width 0.5s',
-                      pointerEvents: 'none',
-                    }} />
 
                     <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
