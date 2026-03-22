@@ -29,9 +29,9 @@ const NAV_SECTIONS = [
   {
     label: 'Track',
     items: [
-      { href: '/now',      icon: '🍅', label: 'Pomodoro' },
-      { href: '/trackers', icon: '📈', label: 'All Trackers' },
-      { href: '/journal',  icon: '📓', label: 'Journal' },
+      { href: '/time-ledger', icon: '🕐', label: 'Time Ledger' },
+      { href: '/now',         icon: '🍅', label: 'Pomodoro' },
+      { href: '/journal',     icon: '📓', label: 'Journal' },
     ],
   },
   {

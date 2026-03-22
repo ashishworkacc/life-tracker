@@ -12,12 +12,13 @@ const PRIMARY_NAV = [
 ]
 
 const MORE_SECTIONS = [
-  { href: '/health',    icon: '🍎', label: 'Health' },
-  { href: '/now',       icon: '🍅', label: 'Pomodoro' },
-  { href: '/journal',   icon: '📓', label: 'Journal' },
-  { href: '/cravings',  icon: '⚠️', label: 'Cravings' },
-  { href: '/chat',      icon: '💬', label: 'AI Chat' },
-  { href: '/life-os',   icon: '🧬', label: 'Life OS' },
+  { href: '/health',      icon: '🍎', label: 'Health' },
+  { href: '/time-ledger', icon: '🕐', label: 'Time' },
+  { href: '/now',         icon: '🍅', label: 'Focus' },
+  { href: '/journal',     icon: '📓', label: 'Journal' },
+  { href: '/cravings',    icon: '⚠️', label: 'Cravings' },
+  { href: '/chat',        icon: '💬', label: 'AI Chat' },
+  { href: '/life-os',     icon: '🧬', label: 'Life OS' },
   { href: '/trackers',  icon: '📈', label: 'Trackers' },
   { href: '/settings',  icon: '⚙️', label: 'Settings' },
 ]
