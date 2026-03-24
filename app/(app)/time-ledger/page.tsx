@@ -34,6 +34,8 @@ const CLASS_META = {
   'mediocre':    { label: 'Mediocre',    color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  icon: '💀' },
 } as const
 
+const BULK_LABELS = ['Deep Work', 'Sleep', 'Break', 'Admin', 'Workout', 'Personal']
+
 function dateStr(d: Date) { return d.toISOString().split('T')[0] }
 function addDays(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate() + n); return r }
 function isCurrentSlot(slot: string) {
@@ -57,14 +59,18 @@ interface SlotRowProps {
   isToday: boolean
   isPast: boolean
   isSaving: boolean
+  bulkMode: boolean
+  isSelected: boolean
   onActivate: (slot: string) => void
   onDeactivate: () => void
   onUpdate: (slot: string, entry: string) => void
+  onToggleSelect: (slot: string) => void
 }
 
 const SlotRow = memo(function SlotRow({
   slot, block, ghost, isActive, isToday, isPast, isSaving,
-  onActivate, onDeactivate, onUpdate,
+  bulkMode, isSelected,
+  onActivate, onDeactivate, onUpdate, onToggleSelect,
 }: SlotRowProps) {
   const entry = block?.entry ?? ''
   const cls   = block?.classification ?? null
@@ -76,7 +82,7 @@ const SlotRow = memo(function SlotRow({
   const isActiveRef = useRef(isActive)
   isActiveRef.current = isActive
 
-  // Sync external entry changes into local state (e.g. after AI analysis)
+  // Sync external entry changes into local state (e.g. after AI analysis or bulk fill)
   useEffect(() => {
     if (!isActiveRef.current) setLocalValue(entry)
   }, [entry])
@@ -91,23 +97,46 @@ const SlotRow = memo(function SlotRow({
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: '0.5rem',
       padding: '0.3rem 0.5rem', borderRadius: 8, transition: 'background 0.2s',
-      background: isCurrent ? 'rgba(20,184,166,0.08)' : cls ? meta!.bg : 'transparent',
-      border: isCurrent ? '1px solid rgba(20,184,166,0.3)' : '1px solid transparent',
+      background: isSelected
+        ? 'rgba(99,102,241,0.12)'
+        : isCurrent ? 'rgba(20,184,166,0.08)' : cls ? meta!.bg : 'transparent',
+      border: isSelected
+        ? '1px solid rgba(99,102,241,0.4)'
+        : isCurrent ? '1px solid rgba(20,184,166,0.3)' : '1px solid transparent',
     }}>
-      {/* Time label */}
-      <div style={{
-        width: 40, flexShrink: 0, paddingTop: '0.4rem',
-        fontSize: '0.65rem', fontFamily: 'monospace',
-        color: isCurrent ? '#14b8a6' : 'var(--text-muted)',
-        fontWeight: isCurrent ? 800 : 500,
-      }}>
-        {slot}
-        {isCurrent && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#14b8a6', marginTop: 2 }} />}
-      </div>
+      {/* Bulk checkbox OR time label */}
+      {bulkMode ? (
+        <div
+          onClick={() => onToggleSelect(slot)}
+          style={{
+            width: 40, flexShrink: 0, paddingTop: '0.4rem', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}
+        >
+          <div style={{
+            width: 16, height: 16, borderRadius: 4, border: '2px solid',
+            borderColor: isSelected ? '#6366f1' : 'var(--border)',
+            background: isSelected ? '#6366f1' : 'transparent',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isSelected && <span style={{ color: '#fff', fontSize: '0.6rem', fontWeight: 900 }}>✓</span>}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          width: 40, flexShrink: 0, paddingTop: '0.4rem',
+          fontSize: '0.65rem', fontFamily: 'monospace',
+          color: isCurrent ? '#14b8a6' : 'var(--text-muted)',
+          fontWeight: isCurrent ? 800 : 500,
+        }}>
+          {slot}
+          {isCurrent && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#14b8a6', marginTop: 2 }} />}
+        </div>
+      )}
 
       {/* Input */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        {isActive ? (
+        {isActive && !bulkMode ? (
           <textarea
             autoFocus
             value={localValue}
@@ -124,9 +153,10 @@ const SlotRow = memo(function SlotRow({
           />
         ) : (
           <div
-            onClick={() => onActivate(slot)}
+            onClick={() => bulkMode ? onToggleSelect(slot) : onActivate(slot)}
             style={{
-              minHeight: 28, padding: '0.35rem 0.5rem', borderRadius: 8, cursor: 'text',
+              minHeight: 28, padding: '0.35rem 0.5rem', borderRadius: 8,
+              cursor: bulkMode ? 'pointer' : 'text',
               fontSize: '0.78rem',
               color: entry ? (meta?.color ?? 'var(--text-primary)') : 'var(--text-muted)',
               fontStyle: entry ? 'normal' : 'italic',
@@ -141,7 +171,7 @@ const SlotRow = memo(function SlotRow({
       </div>
 
       {/* Classification badge */}
-      {cls && (
+      {cls && !bulkMode && (
         <div style={{ flexShrink: 0, paddingTop: '0.35rem', fontSize: '0.65rem', fontWeight: 700, color: meta!.color }}>
           {meta!.icon}
         </div>
@@ -170,7 +200,16 @@ export default function TimeLedgerPage() {
   const daysRef = useRef(days)
   daysRef.current = days
 
+  // Bulk fill state
+  const [bulkMode, setBulkMode] = useState(false)
+  const [selectedSlots, setSelectedSlots] = useState<Set<string>>(new Set())
+  const [bulkLabel, setBulkLabel] = useState(BULK_LABELS[0])
+  const [bulkApplying, setBulkApplying] = useState(false)
+
   const isToday = selectedDate === todayStr
+
+  // Exit bulk mode when changing date
+  useEffect(() => { setBulkMode(false); setSelectedSlots(new Set()) }, [selectedDate])
 
   useEffect(() => { if (user) loadData() }, [user])
 
@@ -212,13 +251,19 @@ export default function TimeLedgerPage() {
   }
 
   // Stable callbacks passed to SlotRow — won't cause remount
-  const handleActivate = useCallback((slot: string) => setActiveSlot(slot), [])
+  const handleActivate   = useCallback((slot: string) => setActiveSlot(slot), [])
   const handleDeactivate = useCallback(() => setActiveSlot(null), [])
+  const handleToggleSelect = useCallback((slot: string) => {
+    setSelectedSlots(prev => {
+      const next = new Set(prev)
+      if (next.has(slot)) next.delete(slot); else next.add(slot)
+      return next
+    })
+  }, [])
 
   const handleUpdate = useCallback((slot: string, entry: string) => {
     if (!user) return
 
-    // Update local state immediately (no remount — SlotRow manages its own display)
     setDays(prev => {
       const cur = prev[selectedDate]?.blocks ?? {}
       return {
@@ -237,7 +282,6 @@ export default function TimeLedgerPage() {
       }
     })
 
-    // Debounced Firestore save
     clearTimeout(saveTimers.current[slot])
     saveTimers.current[slot] = setTimeout(async () => {
       if (!entry.trim()) return
@@ -270,6 +314,75 @@ export default function TimeLedgerPage() {
       }
     }, 1000)
   }, [user, selectedDate])
+
+  async function handleBulkApply() {
+    if (!user || selectedSlots.size === 0) return
+    setBulkApplying(true)
+    const slots = Array.from(selectedSlots)
+    // Apply locally
+    setDays(prev => {
+      const cur = prev[selectedDate]?.blocks ?? {}
+      const updated = { ...cur }
+      for (const slot of slots) {
+        updated[slot] = { entry: bulkLabel, classification: cur[slot]?.classification ?? null }
+      }
+      return { ...prev, [selectedDate]: { ...prev[selectedDate], blocks: updated } }
+    })
+    // Save to Firestore
+    try {
+      const daySnap = daysRef.current[selectedDate]
+      const curBlocks = daySnap?.blocks ?? {}
+      const updatedBlocks = { ...curBlocks }
+      for (const slot of slots) {
+        updatedBlocks[slot] = { entry: bulkLabel, classification: curBlocks[slot]?.classification ?? null }
+      }
+      const docId = `${user.uid}_${selectedDate}`
+      await setDocument('time_ledger', docId, {
+        userId: user.uid, date: selectedDate, blocks: updatedBlocks,
+        mediocreScore: daySnap?.mediocreScore ?? null,
+        status: daySnap?.status ?? null,
+        verdict: daySnap?.verdict ?? null,
+        analyzedAt: daySnap?.analyzedAt ?? null,
+      })
+      setSavedFlash(true)
+      setTimeout(() => setSavedFlash(false), 1500)
+    } catch {
+      setSaveError('Bulk save failed'); setTimeout(() => setSaveError(null), 4000)
+    }
+    setBulkApplying(false)
+    setBulkMode(false)
+    setSelectedSlots(new Set())
+  }
+
+  async function quickFillGap(slots: string[], label: string) {
+    if (!user) return
+    setDays(prev => {
+      const cur = prev[selectedDate]?.blocks ?? {}
+      const updated = { ...cur }
+      for (const slot of slots) {
+        updated[slot] = { entry: label, classification: cur[slot]?.classification ?? null }
+      }
+      return { ...prev, [selectedDate]: { ...prev[selectedDate], blocks: updated } }
+    })
+    try {
+      const daySnap = daysRef.current[selectedDate]
+      const curBlocks = { ...daySnap?.blocks ?? {} }
+      for (const slot of slots) {
+        curBlocks[slot] = { entry: label, classification: null }
+      }
+      const docId = `${user.uid}_${selectedDate}`
+      await setDocument('time_ledger', docId, {
+        userId: user.uid, date: selectedDate, blocks: curBlocks,
+        mediocreScore: daySnap?.mediocreScore ?? null,
+        status: daySnap?.status ?? null,
+        verdict: daySnap?.verdict ?? null,
+        analyzedAt: daySnap?.analyzedAt ?? null,
+      })
+      setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1500)
+    } catch {
+      setSaveError('Save failed'); setTimeout(() => setSaveError(null), 4000)
+    }
+  }
 
   async function analyzeDay() {
     if (!user) return
@@ -315,6 +428,36 @@ export default function TimeLedgerPage() {
   const mainten   = analyzed.filter(b => b.classification === 'maintenance').length
   const mediocre  = analyzed.filter(b => b.classification === 'mediocre').length
 
+  // Focus Score (only meaningful after analysis)
+  const focusScore = analyzed.length > 0 ? Math.round((highYield / analyzed.length) * 100) : null
+  const focusColor = focusScore === null ? '#6366f1'
+    : focusScore >= 60 ? '#10b981'
+    : focusScore >= 40 ? '#f59e0b'
+    : '#ef4444'
+
+  // Gap Detection — find 3+ consecutive empty past slots (max 2 gaps shown)
+  const gaps: Array<{ slots: string[]; startLabel: string; endLabel: string }> = []
+  if (selectedDate <= todayStr) {
+    const isPastDay = selectedDate < todayStr
+    let run: string[] = []
+    for (const slot of SLOTS) {
+      const isPast = isPastDay || isPastSlot(slot)
+      const isEmpty = !dayData.blocks?.[slot]?.entry?.trim()
+      if (isPast && isEmpty) {
+        run.push(slot)
+      } else {
+        if (run.length >= 3) {
+          gaps.push({ slots: run, startLabel: run[0], endLabel: run[run.length - 1] })
+        }
+        run = []
+      }
+      if (gaps.length >= 2) break
+    }
+    if (run.length >= 3 && gaps.length < 2) {
+      gaps.push({ slots: run, startLabel: run[0], endLabel: run[run.length - 1] })
+    }
+  }
+
   const statusMeta = dayData.status === 'on-fire'
     ? { label: '🔥 ON FIRE', color: '#10b981', bg: 'rgba(16,185,129,0.1)' }
     : dayData.status === 'mediocre'
@@ -345,6 +488,50 @@ export default function TimeLedgerPage() {
         </div>
       )}
 
+      {/* Bulk Fill sticky bar */}
+      {bulkMode && (
+        <div style={{
+          position: 'fixed', bottom: '5rem', left: '50%', transform: 'translateX(-50%)',
+          zIndex: 200, width: 'calc(100% - 2rem)', maxWidth: 500,
+          background: '#1e1b4b', border: '1px solid rgba(99,102,241,0.4)',
+          borderRadius: 14, padding: '0.75rem 1rem',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#a5b4fc', flexShrink: 0 }}>
+            {selectedSlots.size} selected
+          </span>
+          <span style={{ fontSize: '0.75rem', color: '#64748b', flexShrink: 0 }}>Label as:</span>
+          <select
+            value={bulkLabel}
+            onChange={e => setBulkLabel(e.target.value)}
+            style={{
+              flex: 1, minWidth: 100, padding: '0.35rem 0.5rem', borderRadius: 8,
+              background: '#0f172a', border: '1px solid rgba(99,102,241,0.3)',
+              color: '#e2e8f0', fontSize: '0.8rem', outline: 'none',
+            }}
+          >
+            {BULK_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+          <button
+            onClick={handleBulkApply}
+            disabled={selectedSlots.size === 0 || bulkApplying}
+            style={{
+              padding: '0.4rem 0.85rem', borderRadius: 8, fontWeight: 700,
+              fontSize: '0.8rem', border: 'none', cursor: 'pointer',
+              background: selectedSlots.size > 0 ? '#6366f1' : '#334155',
+              color: '#fff', opacity: bulkApplying ? 0.6 : 1, flexShrink: 0,
+            }}
+          >
+            {bulkApplying ? 'Applying…' : 'Apply'}
+          </button>
+          <button
+            onClick={() => { setBulkMode(false); setSelectedSlots(new Set()) }}
+            style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '1rem', flexShrink: 0 }}
+          >✕</button>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div>
@@ -354,14 +541,28 @@ export default function TimeLedgerPage() {
             {saving && <span style={{ color: '#14b8a6', marginLeft: '0.4rem' }}>· saving…</span>}
           </p>
         </div>
-        <button onClick={analyzeDay} disabled={analyzing || allBlocks.length < 3} style={{
-          background: analyzing ? 'var(--surface-2)' : '#6366f1',
-          color: analyzing ? 'var(--text-muted)' : '#fff',
-          border: 'none', borderRadius: 8, padding: '0.5rem 1rem',
-          fontWeight: 700, fontSize: '0.8rem', cursor: analyzing ? 'wait' : 'pointer',
-        }}>
-          {analyzing ? '🤖 Analyzing…' : '🤖 AI Analyze Day'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => { setBulkMode(b => !b); setSelectedSlots(new Set()) }}
+            style={{
+              background: bulkMode ? 'rgba(99,102,241,0.2)' : 'var(--surface)',
+              color: bulkMode ? '#a5b4fc' : 'var(--text-muted)',
+              border: `1px solid ${bulkMode ? 'rgba(99,102,241,0.4)' : 'var(--border)'}`,
+              borderRadius: 8, padding: '0.5rem 0.85rem',
+              fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer',
+            }}
+          >
+            {bulkMode ? '✕ Cancel' : '☑ Bulk Fill'}
+          </button>
+          <button onClick={analyzeDay} disabled={analyzing || allBlocks.length < 3} style={{
+            background: analyzing ? 'var(--surface-2)' : '#6366f1',
+            color: analyzing ? 'var(--text-muted)' : '#fff',
+            border: 'none', borderRadius: 8, padding: '0.5rem 1rem',
+            fontWeight: 700, fontSize: '0.8rem', cursor: analyzing ? 'wait' : 'pointer',
+          }}>
+            {analyzing ? '🤖 Analyzing…' : '🤖 AI Analyze Day'}
+          </button>
+        </div>
       </div>
 
       {/* Date navigation */}
@@ -394,6 +595,38 @@ export default function TimeLedgerPage() {
         </div>
       )}
 
+      {/* Gap Detection banners */}
+      {gaps.map((gap, i) => {
+        const mins = gap.slots.length * 30
+        const label = mins >= 60 ? `${mins / 60}h` : `${mins}min`
+        return (
+          <div key={i} style={{
+            background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)',
+            borderRadius: 12, padding: '0.65rem 1rem', marginBottom: '0.6rem',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#f59e0b' }}>
+                ⚠️ {label} gap ({gap.startLabel}–{gap.endLabel})
+              </span>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', flex: 1 }}>Backfill with:</span>
+              {['Deep Work', 'Sleep', 'Break', 'Other'].map(chip => (
+                <button
+                  key={chip}
+                  onClick={() => quickFillGap(gap.slots, chip)}
+                  style={{
+                    padding: '0.25rem 0.6rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 600,
+                    border: '1px solid rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.1)',
+                    color: '#f59e0b', cursor: 'pointer',
+                  }}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+
       {/* Stats */}
       {analyzed.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.4rem', marginBottom: '0.85rem' }}>
@@ -417,7 +650,7 @@ export default function TimeLedgerPage() {
         const pct = Math.round((nowMin / 1440) * 100)
         const filled = Math.round((allBlocks.length / 48) * 100)
         return (
-          <div style={{ marginBottom: '0.85rem' }}>
+          <div style={{ marginBottom: '0.6rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
               <span>Day elapsed: {pct}%</span>
               <span>Blocks filled: {allBlocks.length}/48</span>
@@ -426,6 +659,45 @@ export default function TimeLedgerPage() {
               <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: 'rgba(99,102,241,0.25)', borderRadius: 99 }} />
               <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${filled}%`, background: '#14b8a6', borderRadius: 99, opacity: 0.8 }} />
             </div>
+          </div>
+        )
+      })()}
+
+      {/* Focus Score */}
+      {focusScore !== null && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.6rem', padding: '0.5rem 0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10 }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>🎯 Focus Score</span>
+          <div style={{ flex: 1, height: 6, background: 'var(--surface-2)', borderRadius: 99, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${focusScore}%`, background: focusColor, borderRadius: 99, transition: 'width 0.6s ease' }} />
+          </div>
+          <span style={{ fontSize: '0.82rem', fontWeight: 800, color: focusColor, minWidth: 36, textAlign: 'right' }}>{focusScore}%</span>
+          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>({highYield}/{analyzed.length} blocks)</span>
+        </div>
+      )}
+
+      {/* Burn-down bar (today only) */}
+      {isToday && (() => {
+        const now = new Date()
+        const hour = now.getHours()
+        const minPast = now.getMinutes()
+        const WORK_START = 8, WORK_END = 22
+        const totalWorkBlocks = (WORK_END - WORK_START) * 2 // 28
+        // Count elapsed work slots (past slots between 8am–10pm)
+        const elapsedWork = SLOTS.filter(slot => {
+          const [sh] = slot.split(':').map(Number)
+          return sh >= WORK_START && sh < WORK_END && isPastSlot(slot)
+        }).length
+        const productiveLeft = Math.max(0, totalWorkBlocks - elapsedWork - highYield)
+        const pct = Math.round((productiveLeft / totalWorkBlocks) * 100)
+        if (hour < WORK_START || hour >= WORK_END) return null
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.85rem', padding: '0.5rem 0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10 }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>⚡ Productive left</span>
+            <div style={{ flex: 1, height: 6, background: 'var(--surface-2)', borderRadius: 99, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${pct}%`, background: '#6366f1', borderRadius: 99, transition: 'width 0.6s ease' }} />
+            </div>
+            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#6366f1', minWidth: 36, textAlign: 'right' }}>{productiveLeft}</span>
+            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>of {totalWorkBlocks} blocks</span>
           </div>
         )
       })()}
@@ -442,9 +714,12 @@ export default function TimeLedgerPage() {
               isToday={isToday}
               isPast={isToday ? isPastSlot(slot) : selectedDate < todayStr}
               isSaving={saving === slot}
+              bulkMode={bulkMode}
+              isSelected={selectedSlots.has(slot)}
               onActivate={handleActivate}
               onDeactivate={handleDeactivate}
               onUpdate={handleUpdate}
+              onToggleSelect={handleToggleSelect}
             />
           ))}
         </div>
@@ -462,9 +737,12 @@ export default function TimeLedgerPage() {
               isToday={isToday}
               isPast={isToday ? isPastSlot(slot) : selectedDate < todayStr}
               isSaving={saving === slot}
+              bulkMode={bulkMode}
+              isSelected={selectedSlots.has(slot)}
               onActivate={handleActivate}
               onDeactivate={handleDeactivate}
               onUpdate={handleUpdate}
+              onToggleSelect={handleToggleSelect}
             />
           ))}
         </div>

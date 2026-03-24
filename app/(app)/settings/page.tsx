@@ -16,6 +16,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // Telegram
+  const [telegramChatId, setTelegramChatId] = useState('')
+  const [telegramSaving, setTelegramSaving] = useState(false)
+  const [telegramSaved, setTelegramSaved] = useState(false)
+  const [telegramError, setTelegramError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!user) return
     loadSettings()
@@ -28,6 +34,7 @@ export default function SettingsPage() {
       setIdentityStatement(doc.identityStatement ?? '')
       setGraceModeEnabled(doc.graceModeEnabled ?? false)
       setDayStartHour(doc.dayStartHour ?? 5)
+      setTelegramChatId(doc.telegramChatId ?? '')
     }
   }
 
@@ -42,6 +49,52 @@ export default function SettingsPage() {
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  async function saveTelegram() {
+    if (!user) return
+    setTelegramSaving(true)
+    setTelegramError(null)
+    try {
+      const chatId = telegramChatId.trim()
+      // Save chatId on user doc
+      await updateUserDoc(user.uid, { telegramChatId: chatId })
+
+      if (chatId) {
+        // Write telegram_links via server-side route (Admin SDK)
+        const res = await fetch('/api/telegram/link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.uid, chatId }),
+        })
+        if (!res.ok) throw new Error('Failed to link Telegram')
+      }
+
+      setTelegramSaved(true)
+      setTimeout(() => setTelegramSaved(false), 2000)
+    } catch (err: any) {
+      setTelegramError(err.message ?? 'Failed to save')
+    } finally {
+      setTelegramSaving(false)
+    }
+  }
+
+  async function disconnectTelegram() {
+    if (!user || !telegramChatId) return
+    setTelegramSaving(true)
+    try {
+      await fetch('/api/telegram/link', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: telegramChatId }),
+      })
+      await updateUserDoc(user.uid, { telegramChatId: '' })
+      setTelegramChatId('')
+    } catch {
+      // best-effort
+    } finally {
+      setTelegramSaving(false)
+    }
   }
 
   async function handleSignOut() {
@@ -121,6 +174,43 @@ export default function SettingsPage() {
         <p className="text-[10px] text-muted">
           If you sleep at 3 AM, set this to 4–5 AM so your habits reset after you sleep, not while you&apos;re still awake.
         </p>
+      </div>
+
+      {/* Telegram Check-Ins */}
+      <div className="card space-y-3">
+        <div>
+          <h3 className="font-semibold text-sm mb-1">📱 Telegram Check-Ins</h3>
+          <p className="text-xs text-muted">Get a nudge every 30 min and reply to update your Time Ledger — no app open needed.</p>
+        </div>
+        <div className="space-y-2 text-xs" style={{ color: 'var(--muted)' }}>
+          <p>1. Open <span style={{ color: '#14b8a6', fontWeight: 600 }}>t.me/ledger_ak_bot</span> → send <code style={{ background: 'var(--surface-2)', padding: '1px 4px', borderRadius: 4 }}>/start</code></p>
+          <p>2. Copy the Chat ID the bot sends back and paste it below</p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <input
+            type="text"
+            value={telegramChatId}
+            onChange={e => setTelegramChatId(e.target.value)}
+            placeholder="Your Telegram Chat ID"
+            className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+          />
+          <button
+            onClick={saveTelegram}
+            disabled={telegramSaving}
+            className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
+            style={{ background: telegramSaved ? '#22c55e' : '#14b8a6', color: 'white', whiteSpace: 'nowrap' }}
+          >
+            {telegramSaving ? '...' : telegramSaved ? '✓ Saved' : 'Save'}
+          </button>
+        </div>
+        {telegramError && <p className="text-xs" style={{ color: '#ef4444' }}>{telegramError}</p>}
+        {telegramChatId && !telegramError && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <p className="text-xs" style={{ color: '#22c55e' }}>✓ Connected (ID: {telegramChatId})</p>
+            <button onClick={disconnectTelegram} className="text-xs" style={{ color: '#ef4444' }}>Disconnect</button>
+          </div>
+        )}
       </div>
 
       {/* Save */}

@@ -32,10 +32,10 @@ service cloud.firestore {
     match /{collection}/{docId} {
       allow read, write: if request.auth != null
         && (
-          // User owns the document via userId field
-          resource.data.userId == request.auth.uid
-          // Or creating new document with own userId
-          || (request.method == 'create' && request.resource.data.userId == request.auth.uid)
+          // Updating an existing document — must own it
+          (resource != null && resource.data.userId == request.auth.uid)
+          // Creating a new document — new data must have caller's userId
+          || (resource == null && request.resource.data.userId == request.auth.uid)
         );
     }
 
