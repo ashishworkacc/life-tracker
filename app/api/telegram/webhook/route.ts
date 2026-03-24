@@ -29,9 +29,9 @@ function todayDateStr(): string {
 }
 
 export async function POST(req: NextRequest) {
-  // Verify secret token header
+  // Verify secret token header only when both sides have it configured
   const secret = req.headers.get('x-telegram-bot-api-secret-token')
-  if (WEBHOOK_SECRET && secret !== WEBHOOK_SECRET) {
+  if (WEBHOOK_SECRET && secret && secret !== WEBHOOK_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
