@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { aiComplete } from '@/lib/ai/client'
+import { openrouter, DEFAULT_MODEL } from '@/lib/ai/client'
 
 export async function POST(req: NextRequest) {
   try {
@@ -39,11 +39,19 @@ Respond with ONLY valid JSON — no markdown, no explanation:
 
     const userPrompt = `Classify these time blocks:\n${blockList}`
 
-    const raw = await aiComplete(systemPrompt, userPrompt, { temperature: 0.3, maxTokens: 1200 })
+    const response = await openrouter.chat.completions.create({
+      model: DEFAULT_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.3,
+      max_tokens: 3000,
+      response_format: { type: 'json_object' },
+    })
 
-    // Strip markdown fences if present
-    const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    const parsed = JSON.parse(cleaned)
+    const raw = response.choices[0]?.message?.content ?? '{}'
+    const parsed = JSON.parse(raw)
 
     return NextResponse.json(parsed)
   } catch (e: any) {
