@@ -7,5 +7,8 @@
   "env": {
     "NEXT_PUBLIC_APP_URL": "https://lifetracker.vercel.app"
   },
-  "crons": []
+  "crons": [
+    { "path": "/api/telegram/cron", "schedule": "0 * * * *" },
+    { "path": "/api/telegram/cron", "schedule": "30 * * * *" }
+  ]
 }
