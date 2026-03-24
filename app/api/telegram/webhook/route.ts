@@ -13,19 +13,25 @@ async function sendMessage(chatId: number | string, text: string) {
   })
 }
 
-// Returns the previous 30-min slot label (e.g. "14:00" or "14:30")
-function prevSlot(): string {
-  const now = new Date()
-  // Round down to previous 30-min boundary
-  const totalMins = now.getHours() * 60 + now.getMinutes()
-  const slotMins = totalMins - (totalMins % 30)
-  const h = String(Math.floor(slotMins / 60)).padStart(2, '0')
-  const m = slotMins % 60 === 0 ? '00' : '30'
-  return `${h}:${m}`
+// IST = UTC+5:30. Time Ledger slots are keyed in IST (matches the browser app).
+function toIST(): Date {
+  return new Date(Date.now() + 330 * 60 * 1000)
 }
 
+// Current 30-min slot in IST
+function prevSlot(): string {
+  const ist = toIST()
+  const h = ist.getUTCHours()
+  const m = ist.getUTCMinutes()
+  const slotMins = h * 60 + m - ((h * 60 + m) % 30)
+  const sh = String(Math.floor(slotMins / 60)).padStart(2, '0')
+  const sm = slotMins % 60 === 0 ? '00' : '30'
+  return `${sh}:${sm}`
+}
+
+// Today's date in IST
 function todayDateStr(): string {
-  return new Date().toISOString().split('T')[0]
+  return toIST().toISOString().split('T')[0]
 }
 
 export async function POST(req: NextRequest) {
