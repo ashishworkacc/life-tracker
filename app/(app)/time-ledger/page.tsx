@@ -10,7 +10,7 @@ type Classification = 'high-yield' | 'maintenance' | 'mediocre' | null
 interface Block {
   entry: string
   classification: Classification
-  note?: string
+  note?: string | null
 }
 
 interface DayData {
@@ -275,7 +275,7 @@ export default function TimeLedgerPage() {
             [slot]: {
               entry,
               classification: cur[slot]?.classification ?? null,
-              note: cur[slot]?.note,
+              note: cur[slot]?.note ?? null,
             },
           },
         },
@@ -292,7 +292,7 @@ export default function TimeLedgerPage() {
         const curBlocks = daySnap?.blocks ?? {}
         const updatedBlocks = {
           ...curBlocks,
-          [slot]: { entry, classification: curBlocks[slot]?.classification ?? null, note: curBlocks[slot]?.note },
+          [slot]: { entry, classification: curBlocks[slot]?.classification ?? null, note: curBlocks[slot]?.note ?? null },
         }
         const docId = `${user.uid}_${selectedDate}`
         await setDocument('time_ledger', docId, {
@@ -404,7 +404,7 @@ export default function TimeLedgerPage() {
       const updatedBlocks = { ...(dayData?.blocks ?? {}) }
       for (const r of data.results ?? []) {
         if (updatedBlocks[r.slot]) {
-          updatedBlocks[r.slot] = { ...updatedBlocks[r.slot], classification: r.classification, note: r.note }
+          updatedBlocks[r.slot] = { ...updatedBlocks[r.slot], classification: r.classification, note: r.note ?? null }
         }
       }
       const docId = `${user.uid}_${selectedDate}`
