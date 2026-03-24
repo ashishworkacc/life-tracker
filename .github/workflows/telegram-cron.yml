@@ -1,0 +1,16 @@
+name: Telegram 30-min check-in
+
+on:
+  schedule:
+    - cron: '0,30 7-22 * * *'   # Every 30 min, 7am–10pm UTC
+  workflow_dispatch:              # Allow manual trigger from GitHub Actions tab
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Telegram check-in endpoint
+        run: |
+          curl -sf -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://life-tracker-silk.vercel.app/api/telegram/cron
