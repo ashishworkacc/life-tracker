@@ -101,7 +101,6 @@ export default function CommandCenterPage() {
   // ── UI state ──
   const [oneThing, setOneThing] = useState('')
   const [weight, setWeight]     = useState('')
-  const [burnoutMode, setBurnoutMode] = useState(false)
   const [saving, setSaving]     = useState(false)
   const [saved, setSaved]       = useState(false)
   const [xpPops, setXpPops]     = useState<{ id: number; amount: number; habitId: string }[]>([])
@@ -112,15 +111,6 @@ export default function CommandCenterPage() {
   // Last week habit stats for delta
   const [lastWeekHabitPct, setLastWeekHabitPct] = useState<number | null>(null)
 
-  // ── AI state ──
-  const [aiBrief, setAiBrief]   = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiLoaded, setAiLoaded] = useState(false)
-  const [briefRating, setBriefRating] = useState<'up' | 'down' | null>(null)
-  const [quickThought, setQuickThought] = useState('')
-  const [savingThought, setSavingThought] = useState(false)
-  const [userThoughts, setUserThoughts] = useState<string[]>([])
-
   // ── Auto-refresh every 5 minutes ──
   useEffect(() => {
     if (!user) return
@@ -128,22 +118,6 @@ export default function CommandCenterPage() {
     const t = setInterval(() => { loadData() }, 5 * 60_000)
     return () => clearInterval(t)
   }, [user])
-
-  // Auto-load AI brief when data ready; clear cache if new day
-  useEffect(() => {
-    if (!dataLoaded || aiLoaded || aiLoading) return
-    const LS_BRIEF = 'ai_brief_cache'
-    try {
-      const cached = JSON.parse(localStorage.getItem(LS_BRIEF) ?? 'null')
-      // Clear cache if it's a new day
-      if (cached && cached.date !== date) {
-        localStorage.removeItem(LS_BRIEF)
-      } else if (cached && cached.date === date && Date.now() - cached.ts < 2 * 60 * 60 * 1000) {
-        setAiBrief(cached.brief); setAiLoaded(true); return
-      }
-    } catch { /* ignore */ }
-    loadAiBrief()
-  }, [dataLoaded])
 
   async function loadData() {
     if (!user) return
@@ -365,20 +339,6 @@ export default function CommandCenterPage() {
     setAiNextLoading(false)
   }
 
-  async function saveQuickThought() {
-    if (!user || !quickThought.trim()) return
-    setSavingThought(true)
-    try {
-      await addDocument('activity_logs', {
-        userId: user.uid, date, text: quickThought.trim(),
-        activityTag: 'thought', timestamp: new Date().toISOString(), hour: new Date().getHours(),
-      })
-      setUserThoughts(prev => [quickThought.trim(), ...prev].slice(0, 5))
-      setQuickThought('')
-    } catch { /* ignore */ }
-    setSavingThought(false)
-  }
-
   async function loadCorrelations() {
     if (!user || correlationsLoading) return
     setCorrelationsLoading(true)
@@ -405,87 +365,6 @@ export default function CommandCenterPage() {
       setCorrelationsLoaded(true)
     } catch { setCorrelations([]) }
     setCorrelationsLoading(false)
-  }
-
-  async function rateAiBrief(rating: 'up' | 'down') {
-    if (!user || !aiBrief) return
-    setBriefRating(rating)
-    try {
-      await addDocument('ai_signals', {
-        userId: user.uid,
-        date,
-        type: 'coach_brief',
-        rating,
-        content: aiBrief.slice(0, 200),
-        timestamp: new Date().toISOString(),
-      })
-    } catch { /* ignore */ }
-  }
-
-  async function loadAiBrief() {
-    if (!user || aiLoading) return
-    setAiLoading(true)
-    // Clear cache so a fresh call is made
-    try { localStorage.removeItem('ai_brief_cache') } catch { /* ignore */ }
-    try {
-      const [completedToday, recentThoughts, lifeOSDocs] = await Promise.all([
-        queryDocuments('todos', [
-          where('userId', '==', user.uid), where('completed', '==', true), where('completedAt', '>=', date),
-        ]),
-        queryDocuments('activity_logs', [
-          where('userId', '==', user.uid), where('date', '==', date), where('activityTag', '==', 'thought'),
-        ]),
-        queryDocuments('life_os', [where('userId', '==', user.uid)]),
-      ])
-      const thoughtTexts = recentThoughts.map(l => l.text as string).filter(Boolean).slice(0, 5)
-      setUserThoughts(thoughtTexts)
-      const lifeOS = lifeOSDocs.length > 0 ? (lifeOSDocs[0] as any) : null
-
-      // Build last-3-day habit completion rates for trend
-      const last3DayRates: number[] = habitDots.slice(-3).map(d =>
-        d.total > 0 ? Math.round((d.done / d.total) * 100) : 0
-      )
-
-      // At-risk habits: not done today + it's afternoon/evening
-      const atRiskHabits: string[] = hour >= 15
-        ? habits
-            .filter(h => !habitsDone.has(h.habitId))
-            .map(h => h.name)
-            .slice(0, 4)
-        : []
-
-      const dayOfWeek = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()]
-      const activeGoalTitles = activeGoals.map(g => g.title)
-
-      const res = await fetch('/api/ai/daily-brief', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date, timeOfDay, dayOfWeek,
-          habits: { done: habitsDone.size, total: habits.length },
-          todos: { p1Pending: p1Todos.length, completedToday: completedToday.length },
-          sleep: todayStats.sleep, focusSessions: todayStats.focus,
-          weeklyHabitPct, xpLevel: xpProgress(xpTotal).level,
-          xpToday, todoStats, atRiskHabits, last3DayRates, activeGoalTitles,
-          topCounters: topCounters.map(c => ({ name: c.name, currentCount: c.currentCount, targetCount: c.targetCount })),
-          userThoughts: thoughtTexts,
-          userId: user.uid,
-          lifeOS: lifeOS ? { mission: lifeOS.mission, values: lifeOS.values, challenges: lifeOS.challenges, strategies: lifeOS.strategies } : null,
-        }),
-      })
-      const data = await res.json()
-      const brief = data.brief ?? ''
-      setAiBrief(brief)
-      setAiLoaded(true)
-      // Cache for 2h with today's date
-      try {
-        localStorage.setItem('ai_brief_cache', JSON.stringify({ brief, date, ts: Date.now() }))
-      } catch { /* ignore */ }
-    } catch {
-      setAiBrief("Focus on your top priority — that's the highest leverage action right now.")
-      setAiLoaded(true)
-    }
-    setAiLoading(false)
   }
 
   async function handleSave() {
@@ -518,10 +397,8 @@ export default function CommandCenterPage() {
   const { level: xpLevel, earned: xpEarned, needed: xpNeeded } = xpProgress(xpTotal)
   const xpBarPct = Math.round((xpEarned / xpNeeded) * 100)
   // Time-filtered habits — only show relevant time-of-day; done habits shown separately as muted ticks
-  const pendingHabits = burnoutMode
-    ? habits.filter(h => h.priority === 1 && !habitsDone.has(h.habitId)).slice(0, 5)
-    : habits.filter(h => !habitsDone.has(h.habitId) &&
-        (habitTimeFilter === 'all' || h.scheduledTime === 'anytime' || h.scheduledTime === habitTimeFilter))
+  const pendingHabits = habits.filter(h => !habitsDone.has(h.habitId) &&
+      (habitTimeFilter === 'all' || h.scheduledTime === 'anytime' || h.scheduledTime === habitTimeFilter))
   const doneHabitsFiltered = habits.filter(h => habitsDone.has(h.habitId) &&
     (habitTimeFilter === 'all' || h.scheduledTime === 'anytime' || h.scheduledTime === habitTimeFilter))
   const displayHabits = pendingHabits
@@ -669,73 +546,6 @@ export default function CommandCenterPage() {
             </div>
           )}
 
-          {/* 3. AI COACH */}
-          <div className="card space-y-3" style={{ border: '1px solid rgba(168,85,247,0.2)' }}>
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-sm flex items-center gap-2">🤖 AI Coach</h3>
-              <button onClick={() => { setAiLoaded(false); loadAiBrief() }} disabled={aiLoading}
-                className="text-[10px] px-2.5 py-1 rounded-lg disabled:opacity-40"
-                style={{ background: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
-                {aiLoading ? '⏳' : '↻ Refresh'}
-              </button>
-            </div>
-
-            {/* Quick thought input */}
-            <div className="flex gap-2">
-              <input
-                value={quickThought}
-                onChange={e => setQuickThought(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { saveQuickThought(); e.preventDefault() } }}
-                placeholder="💭 Share a thought… (affects AI suggestions)"
-                className="flex-1 px-3 py-2 rounded-xl text-xs outline-none"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-              />
-              <button onClick={saveQuickThought} disabled={!quickThought.trim() || savingThought}
-                className="px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
-                style={{ background: 'rgba(168,85,247,0.15)', color: '#a855f7' }}>
-                {savingThought ? '…' : 'Add'}
-              </button>
-            </div>
-
-            {userThoughts.length > 0 && (
-              <div className="space-y-1">
-                {userThoughts.slice(0, 3).map((t, i) => (
-                  <p key={i} className="text-[10px] text-muted italic px-1">💭 {t}</p>
-                ))}
-              </div>
-            )}
-
-            {aiLoading ? (
-              <div className="flex items-center gap-1.5 py-1">
-                {[0, 0.15, 0.3].map((d, i) => (
-                  <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a855f7', animationDelay: `${d}s` }} />
-                ))}
-                <span className="text-xs text-muted ml-1">Analysing your data…</span>
-              </div>
-            ) : aiLoaded ? (
-              <>
-                <p className="text-sm leading-relaxed">{aiBrief}</p>
-                {/* Signal system */}
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-[10px] text-muted">Was this helpful?</span>
-                  <button onClick={() => rateAiBrief('up')}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px]"
-                    style={{ background: briefRating === 'up' ? 'rgba(34,197,94,0.2)' : 'var(--surface-2)', border: `1px solid ${briefRating === 'up' ? '#22c55e' : 'var(--border)'}`, color: briefRating === 'up' ? '#22c55e' : 'var(--muted)' }}>
-                    👍
-                  </button>
-                  <button onClick={() => rateAiBrief('down')}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px]"
-                    style={{ background: briefRating === 'down' ? 'rgba(239,68,68,0.2)' : 'var(--surface-2)', border: `1px solid ${briefRating === 'down' ? '#ef4444' : 'var(--border)'}`, color: briefRating === 'down' ? '#ef4444' : 'var(--muted)' }}>
-                    👎
-                  </button>
-                  {briefRating && <span className="text-[10px] text-muted">{briefRating === 'up' ? 'Thanks! Signals noted.' : 'Got it — improving next time.'}</span>}
-                </div>
-              </>
-            ) : (
-              <p className="text-xs text-muted">Loading insights…</p>
-            )}
-          </div>
-
           {/* 3. ONE THING — pick from P1 todos */}
           <div className="px-4 py-3 rounded-xl space-y-2"
             style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.25)' }}>
@@ -844,7 +654,7 @@ export default function CommandCenterPage() {
             </div>
 
             {/* Time-of-day filter pills */}
-            {!burnoutMode && habits.length > 0 && (
+            {habits.length > 0 && (
               <div style={{ display: 'flex', gap: '0.3rem', marginBottom: '0.75rem', overflowX: 'auto' }}>
                 {(['all', 'morning', 'afternoon', 'evening'] as const).map(f => {
                   const icons: Record<string, string> = { all: '🌐', morning: '🌅', afternoon: '☀️', evening: '🌙' }
@@ -923,57 +733,6 @@ export default function CommandCenterPage() {
               </div>
             )}
           </section>
-
-          {/* 6. 7-DAY HABIT STREAK */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-sm">📈 This Week</h3>
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                {weeklyHabitPct != null && (
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                    style={{
-                      background: weeklyHabitPct >= 70 ? 'rgba(34,197,94,0.15)' : weeklyHabitPct >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                      color:      weeklyHabitPct >= 70 ? '#22c55e' : weeklyHabitPct >= 40 ? '#f59e0b' : '#ef4444',
-                    }}>
-                    {weeklyHabitPct}% avg
-                  </span>
-                )}
-                {habitDelta !== null && (
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: habitDelta >= 0 ? '#22c55e' : '#ef4444' }}>
-                    {habitDelta >= 0 ? '↑' : '↓'}{Math.abs(habitDelta)}% vs last week
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="flex justify-between gap-1">
-              {Array.from({ length: 7 }).map((_, i) => {
-                const d    = new Date(); d.setDate(d.getDate() - (6 - i))
-                const dStr = d.toISOString().split('T')[0]
-                const dot  = habitDots.find(h => h.date === dStr)
-                const pct  = dot?.total ? dot.done / dot.total : 0
-                const dayLabel = d.toLocaleDateString('en-IN', { weekday: 'short' }).slice(0, 2)
-                const isToday  = dStr === date
-                let bg = 'var(--surface-2)'
-                if (pct >= 0.9) bg = '#22c55e'
-                else if (pct >= 0.6) bg = '#86efac'
-                else if (pct >= 0.3) bg = '#fcd34d'
-                else if (dot) bg = '#fca5a5'
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                    {dot && dot.total > 0
-                      ? <span className="text-[9px] font-bold" style={{ color: pct >= 0.6 ? '#22c55e' : '#f59e0b' }}>{dot.done}/{dot.total}</span>
-                      : <span className="text-[9px]">&nbsp;</span>}
-                    <div className="w-full rounded-lg"
-                      style={{ height: 28, background: bg, border: isToday ? '2px solid #14b8a6' : '1px solid var(--border)', opacity: dot ? 1 : 0.35 }} />
-                    <span className="text-[10px]"
-                      style={{ color: isToday ? '#14b8a6' : 'var(--muted)', fontWeight: isToday ? 600 : 400 }}>
-                      {dayLabel}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
 
         </div>{/* end LEFT column */}
 
@@ -1207,17 +966,8 @@ export default function CommandCenterPage() {
 
       </div>{/* end desktop-two-col */}
 
-      {/* ── Full-width footer: maintenance mode + mini save ── */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <button onClick={() => setBurnoutMode(v => !v)}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full"
-          style={{
-            background: burnoutMode ? 'rgba(99,102,241,0.15)' : 'var(--surface-2)',
-            color: burnoutMode ? '#818cf8' : 'var(--muted)',
-            border: `1px solid ${burnoutMode ? 'rgba(99,102,241,0.4)' : 'var(--border)'}`,
-          }}>
-          {burnoutMode ? '🛡️ Maintenance Mode ON — showing core only' : '🛡️ Maintenance Mode'}
-        </button>
+      {/* ── Full-width footer: mini save ── */}
+      <div className="flex items-center justify-end flex-wrap gap-2">
         <button onClick={handleSave} disabled={saving}
           className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-full font-semibold disabled:opacity-50"
           style={{ background: saved ? 'rgba(34,197,94,0.15)' : 'rgba(20,184,166,0.12)', color: saved ? '#22c55e' : '#14b8a6', border: `1px solid ${saved ? 'rgba(34,197,94,0.3)' : 'rgba(20,184,166,0.3)'}` }}>

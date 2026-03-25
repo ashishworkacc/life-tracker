@@ -40,6 +40,7 @@ export default function FoodTrackerPage() {
   const [fat, setFat] = useState('')
   const [calories, setCalories] = useState('')
   const [zomato, setZomato] = useState(false)
+  const [entryDate, setEntryDate] = useState(today)
   const [saving, setSaving] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState('')
@@ -73,6 +74,7 @@ export default function FoodTrackerPage() {
   function openAdd(meal: string) {
     setEditingId(null)
     setActiveMeal(meal)
+    setEntryDate(today)
     setDesc(''); setQuantity(''); setUnit('g')
     setProtein(''); setCarbs(''); setFat(''); setCalories(''); setZomato(false)
     setAiError('')
@@ -82,6 +84,7 @@ export default function FoodTrackerPage() {
   function openEdit(entry: FoodEntry) {
     setEditingId(entry.id)
     setActiveMeal(entry.mealType)
+    setEntryDate((entry as any).date ?? today)
     setDesc(entry.description)
     setQuantity(String(entry.quantity || ''))
     setUnit(entry.unit || 'g')
@@ -124,7 +127,7 @@ export default function FoodTrackerPage() {
     setSaving(true)
     const data = {
       userId: user.uid,
-      date: today,
+      date: entryDate,
       mealType: activeMeal,
       description: desc.trim(),
       quantity: parseFloat(quantity) || null,
@@ -244,6 +247,11 @@ export default function FoodTrackerPage() {
               <h3 className="font-semibold">{editingId ? 'Edit' : 'Add to'} {activeMeal}</h3>
               <button onClick={() => setModalOpen(false)} className="text-muted text-lg">✕</button>
             </div>
+
+            {/* Date picker */}
+            <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl text-sm outline-none"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--muted)' }} />
 
             {/* Food name */}
             <input type="text" value={desc} onChange={e => setDesc(e.target.value)}

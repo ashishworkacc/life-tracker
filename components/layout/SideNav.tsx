@@ -14,7 +14,7 @@ const NAV_SECTIONS = [
       { href: '/command-center', icon: '⚡', label: 'Today' },
       { href: '/todos',          icon: '📋', label: 'Todos' },
       { href: '/habits',         icon: '✅', label: 'Habits' },
-      { href: '/counters',       icon: '🔢', label: 'Counters' },
+      { href: '/counters',       icon: '📈', label: 'Trackers' },
     ],
   },
   {
@@ -31,20 +31,12 @@ const NAV_SECTIONS = [
     items: [
       { href: '/time-ledger', icon: '🕐', label: 'Time Ledger' },
       { href: '/now',         icon: '🍅', label: 'Pomodoro' },
-      { href: '/journal',     icon: '📓', label: 'Journal' },
-    ],
-  },
-  {
-    label: 'AI',
-    items: [
-      { href: '/chat',        icon: '💬', label: 'AI Chat' },
-      { href: '/ai-insights', icon: '🤖', label: 'AI Insights' },
+      { href: '/life-os',     icon: '🧬', label: 'Life OS' },
     ],
   },
   {
     label: 'More',
     items: [
-      { href: '/life-os',  icon: '🧬', label: 'Life OS' },
       { href: '/settings', icon: '⚙️', label: 'Settings' },
     ],
   },

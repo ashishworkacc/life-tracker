@@ -10,12 +10,6 @@ export default function SettingsPage() {
   const { user } = useAuth()
   const router = useRouter()
 
-  const [identityStatement, setIdentityStatement] = useState('')
-  const [graceModeEnabled, setGraceModeEnabled] = useState(false)
-  const [dayStartHour, setDayStartHour] = useState(5) // Custom day reset — default 5 AM
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-
   // Telegram
   const [telegramChatId, setTelegramChatId] = useState('')
   const [telegramSaving, setTelegramSaving] = useState(false)
@@ -24,32 +18,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!user) return
-    loadSettings()
-  }, [user])
-
-  async function loadSettings() {
-    if (!user) return
-    const doc = await getUserDoc(user.uid)
-    if (doc) {
-      setIdentityStatement(doc.identityStatement ?? '')
-      setGraceModeEnabled(doc.graceModeEnabled ?? false)
-      setDayStartHour(doc.dayStartHour ?? 5)
-      setTelegramChatId(doc.telegramChatId ?? '')
-    }
-  }
-
-  async function saveSettings() {
-    if (!user) return
-    setSaving(true)
-    await updateUserDoc(user.uid, {
-      identityStatement,
-      graceModeEnabled,
-      dayStartHour,
+    getUserDoc(user.uid).then(doc => {
+      if (doc) setTelegramChatId(doc.telegramChatId ?? '')
     })
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
+  }, [user])
 
   async function saveTelegram() {
     if (!user) return
@@ -57,11 +29,8 @@ export default function SettingsPage() {
     setTelegramError(null)
     try {
       const chatId = telegramChatId.trim()
-      // Save chatId on user doc
       await updateUserDoc(user.uid, { telegramChatId: chatId })
-
       if (chatId) {
-        // Write telegram_links via server-side route (Admin SDK)
         const res = await fetch('/api/telegram/link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -69,7 +38,6 @@ export default function SettingsPage() {
         })
         if (!res.ok) throw new Error('Failed to link Telegram')
       }
-
       setTelegramSaved(true)
       setTimeout(() => setTelegramSaved(false), 2000)
     } catch (err: any) {
@@ -120,67 +88,11 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Identity statement */}
-      <div className="card space-y-3">
-        <div>
-          <h3 className="font-semibold text-sm mb-1">Identity Statement</h3>
-          <p className="text-xs text-muted">This appears at the top of your Command Center as a daily reminder.</p>
-        </div>
-        <textarea
-          value={identityStatement}
-          onChange={e => setIdentityStatement(e.target.value)}
-          placeholder="e.g. I am someone who takes care of their health every day"
-          rows={2}
-          className="w-full px-3 py-2.5 rounded-xl text-sm outline-none resize-none"
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-        />
-      </div>
-
-      {/* Grace mode */}
-      <div className="card">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-sm mb-1">Grace Mode</h3>
-            <p className="text-xs text-muted">Allow one missed day before breaking habit streaks.</p>
-          </div>
-          <button
-            onClick={() => setGraceModeEnabled(!graceModeEnabled)}
-            className="relative w-12 h-6 rounded-full transition-colors flex-shrink-0"
-            style={{ background: graceModeEnabled ? '#14b8a6' : 'var(--surface-2)', border: '1px solid var(--border)' }}
-          >
-            <div className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all"
-              style={{ left: graceModeEnabled ? '22px' : '2px' }} />
-          </button>
-        </div>
-      </div>
-
-      {/* Custom Day Reset */}
-      <div className="card space-y-3">
-        <div>
-          <h3 className="font-semibold text-sm mb-1">🌙 Custom Day Reset</h3>
-          <p className="text-xs text-muted">Your "today" rolls over at this hour — ideal if you work late nights or past midnight.</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <input
-            type="range" min={0} max={8} step={1}
-            value={dayStartHour}
-            onChange={e => setDayStartHour(Number(e.target.value))}
-            style={{ flex: 1, accentColor: '#14b8a6' }}
-          />
-          <span style={{ minWidth: 56, textAlign: 'center', fontWeight: 700, color: '#14b8a6', fontSize: '0.9rem' }}>
-            {dayStartHour === 0 ? 'Midnight' : `${dayStartHour}:00 AM`}
-          </span>
-        </div>
-        <p className="text-[10px] text-muted">
-          If you sleep at 3 AM, set this to 4–5 AM so your habits reset after you sleep, not while you&apos;re still awake.
-        </p>
-      </div>
-
       {/* Telegram Check-Ins */}
       <div className="card space-y-3">
         <div>
           <h3 className="font-semibold text-sm mb-1">📱 Telegram Check-Ins</h3>
-          <p className="text-xs text-muted">Get a nudge every 30 min and reply to update your Time Ledger — no app open needed.</p>
+          <p className="text-xs text-muted">Get a nudge every 30 min (10am–3am IST) and reply to update your Time Ledger — no app open needed.</p>
         </div>
         <div className="space-y-2 text-xs" style={{ color: 'var(--muted)' }}>
           <p>1. Open <span style={{ color: '#14b8a6', fontWeight: 600 }}>t.me/ledger_ak_bot</span> → send <code style={{ background: 'var(--surface-2)', padding: '1px 4px', borderRadius: 4 }}>/start</code></p>
@@ -211,41 +123,13 @@ export default function SettingsPage() {
             <button onClick={disconnectTelegram} className="text-xs" style={{ color: '#ef4444' }}>Disconnect</button>
           </div>
         )}
-      </div>
 
-      {/* Save */}
-      <button onClick={saveSettings} disabled={saving}
-        className="w-full py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
-        style={{ background: saved ? '#22c55e' : '#14b8a6', color: 'white' }}>
-        {saving ? 'Saving...' : saved ? '✓ Saved!' : 'Save settings'}
-      </button>
-
-      {/* Links */}
-      <div className="card space-y-2">
-        <h3 className="font-semibold text-sm mb-2">Quick Links</h3>
-        {[
-          { href: '/counters', label: '🎯 Custom Counters', desc: 'Manage your count trackers' },
-          { href: '/gamification', label: '⚡ XP & Badges', desc: 'View your level and achievements' },
-          { href: '/ai-insights', label: '🤖 AI Insights', desc: 'View AI-generated insights' },
-          { href: '/chat', label: '💬 AI Chat', desc: 'Chat with your AI assistant' },
-        ].map(link => (
-          <a key={link.href} href={link.href}
-            className="flex items-center justify-between px-3 py-2.5 rounded-xl"
-            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-            <div>
-              <p className="text-sm">{link.label}</p>
-              <p className="text-xs text-muted">{link.desc}</p>
-            </div>
-            <span className="text-muted">→</span>
-          </a>
-        ))}
-      </div>
-
-      {/* App info */}
-      <div className="card text-center space-y-1">
-        <p className="text-sm font-semibold" style={{ color: '#14b8a6' }}>LifeTracker</p>
-        <p className="text-xs text-muted">All features free at launch 🎉</p>
-        <p className="text-xs text-muted">Powered by DeepSeek V3 via OpenRouter</p>
+        {/* Food logger bot */}
+        <div className="pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+          <p className="text-xs font-semibold mb-1" style={{ color: 'var(--foreground)' }}>🍽️ Food Logger Bot</p>
+          <p className="text-xs text-muted">Log meals in plain English via Telegram — macros auto-filled by AI.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Open <span style={{ color: '#14b8a6', fontWeight: 600 }}>t.me/food_ak_bot</span> — same Chat ID, no extra setup needed.</p>
+        </div>
       </div>
 
       {/* Sign out */}

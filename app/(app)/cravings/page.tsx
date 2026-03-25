@@ -5,12 +5,6 @@ import { useAuth } from '@/lib/hooks/useAuth'
 import { addDocument, queryDocuments, todayDate, where, orderBy } from '@/lib/firebase/db'
 import type { DocumentData } from 'firebase/firestore'
 
-const HALT_OPTIONS = [
-  { key: 'hungry',  label: 'Hungry',  emoji: '🍔', desc: 'Not eaten recently' },
-  { key: 'angry',   label: 'Angry',   emoji: '😤', desc: 'Frustrated or stressed' },
-  { key: 'lonely',  label: 'Lonely',  emoji: '💔', desc: 'Feeling disconnected' },
-  { key: 'tired',   label: 'Tired',   emoji: '😴', desc: 'Low energy or sleep-deprived' },
-]
 
 const BREATHING_STEPS = [
   { label: 'Breathe IN', duration: 4, color: '#14b8a6' },
@@ -28,7 +22,7 @@ export default function CravingsPage() {
   const [badHabitCue, setBadHabitCue] = useState('')
   const [badHabitThoughts, setBadHabitThoughts] = useState('')
   const [badHabitIntensity, setBadHabitIntensity] = useState(3)
-  const [haltFlags, setHaltFlags] = useState<Record<string, boolean>>({ hungry: false, angry: false, lonely: false, tired: false })
+  const [haltText, setHaltText] = useState('')
   const [didResist, setDidResist] = useState<boolean | null>(null)
 
   // Data state
@@ -137,7 +131,7 @@ export default function CravingsPage() {
       cue: badHabitCue.trim(),
       thoughts: badHabitThoughts.trim(),
       intensity: badHabitIntensity,
-      halt: haltFlags,
+      halt: haltText,
       didResist: didResist ?? false,
     }
     try {
@@ -149,7 +143,7 @@ export default function CravingsPage() {
       setBadHabitCue('')
       setBadHabitThoughts('')
       setBadHabitIntensity(3)
-      setHaltFlags({ hungry: false, angry: false, lonely: false, tired: false })
+      setHaltText('')
       setDidResist(null)
       setActiveTab('history')
     } catch (e) {
@@ -352,23 +346,14 @@ Be direct, specific, and actionable. Reference actual data. No fluff.`,
           {/* HALT */}
           <div>
             <p className="text-[10px] text-muted uppercase mb-1.5 font-semibold">HALT Check — what were you feeling?</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
-              {HALT_OPTIONS.map(opt => (
-                <button
-                  key={opt.key}
-                  onClick={() => setHaltFlags(p => ({ ...p, [opt.key]: !p[opt.key] }))}
-                  style={{
-                    padding: '0.6rem', borderRadius: 10, border: `1px solid ${haltFlags[opt.key] ? '#ef4444' : 'var(--border)'}`,
-                    background: haltFlags[opt.key] ? 'rgba(239,68,68,0.1)' : 'var(--surface-2)',
-                    cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
-                  }}
-                >
-                  <div style={{ fontSize: '1rem' }}>{opt.emoji}</div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 600, color: haltFlags[opt.key] ? '#ef4444' : 'var(--foreground)' }}>{opt.label}</div>
-                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{opt.desc}</div>
-                </button>
-              ))}
-            </div>
+            <textarea
+              value={haltText}
+              onChange={e => setHaltText(e.target.value)}
+              placeholder="Describe what you were feeling (hungry, stressed, bored, lonely, tired, anxious...)"
+              rows={3}
+              className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)', lineHeight: 1.6 }}
+            />
           </div>
 
           {/* Cue */}
@@ -479,19 +464,19 @@ Be direct, specific, and actionable. Reference actual data. No fluff.`,
                         </span>
                       </div>
                     </div>
-                    {/* HALT badges */}
-                    {log.halt && Object.entries(log.halt as Record<string, boolean>).filter(([, v]) => v).length > 0 && (
+                    {/* HALT */}
+                    {log.halt && typeof log.halt === 'string' && (
+                      <p className="text-xs text-muted">🧠 {log.halt}</p>
+                    )}
+                    {log.halt && typeof log.halt === 'object' && Object.values(log.halt as Record<string, boolean>).some(Boolean) && (
                       <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
                         {Object.entries(log.halt as Record<string, boolean>)
                           .filter(([, v]) => v)
-                          .map(([k]) => {
-                            const opt = HALT_OPTIONS.find(o => o.key === k)
-                            return (
-                              <span key={k} style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderRadius: 99, fontSize: '0.68rem', padding: '1px 7px' }}>
-                                {opt?.emoji} {opt?.label}
-                              </span>
-                            )
-                          })}
+                          .map(([k]) => (
+                            <span key={k} style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderRadius: 99, fontSize: '0.68rem', padding: '1px 7px' }}>
+                              {k}
+                            </span>
+                          ))}
                       </div>
                     )}
                     {log.cue && <p className="text-xs text-muted">📍 {log.cue}</p>}
@@ -534,11 +519,10 @@ Be direct, specific, and actionable. Reference actual data. No fluff.`,
               <div className="space-y-2">
                 {topHalt.map(([label, count]) => {
                   const pct = Math.round((count / badHabitLogs.length) * 100)
-                  const opt = HALT_OPTIONS.find(o => o.label === label)
                   return (
                     <div key={label}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                        <span style={{ fontSize: '0.8rem' }}>{opt?.emoji} {label}</span>
+                        <span style={{ fontSize: '0.8rem' }}>{label}</span>
                         <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#ef4444' }}>{count}x ({pct}%)</span>
                       </div>
                       <div style={{ height: 5, background: 'var(--border)', borderRadius: 99 }}>

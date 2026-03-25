@@ -5,23 +5,22 @@ import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 
 const PRIMARY_NAV = [
-  { href: '/command-center', label: 'Today',  icon: '⚡' },
-  { href: '/todos',          label: 'Todos',  icon: '📋' },
-  { href: '/habits',         label: 'Habits', icon: '✅' },
-  { href: '/time-ledger',    label: 'Time',   icon: '🕐' },
-  { href: '/counters',       label: 'Count',  icon: '🔢' },
+  { href: '/command-center', label: 'Today',    icon: '⚡' },
+  { href: '/todos',          label: 'Todos',    icon: '📋' },
+  { href: '/habits',         label: 'Habits',   icon: '✅' },
+  { href: '/time-ledger',    label: 'Time',     icon: '🕐' },
+  { href: '/counters',       label: 'Trackers', icon: '📈' },
 ]
 
 const MORE_SECTIONS = [
-  { href: '/health',      icon: '🍎', label: 'Health' },
-  { href: '/time-ledger', icon: '🕐', label: 'Time' },
-  { href: '/now',         icon: '🍅', label: 'Focus' },
-  { href: '/journal',     icon: '📓', label: 'Journal' },
-  { href: '/cravings',    icon: '⚠️', label: 'Cravings' },
-  { href: '/chat',        icon: '💬', label: 'AI Chat' },
-  { href: '/life-os',     icon: '🧬', label: 'Life OS' },
-  { href: '/trackers',  icon: '📈', label: 'Trackers' },
-  { href: '/settings',  icon: '⚙️', label: 'Settings' },
+  { href: '/health',        icon: '🍎', label: 'Health' },
+  { href: '/trackers/food', icon: '🥗', label: 'Food Log' },
+  { href: '/trackers/vitals', icon: '💊', label: 'Vitals' },
+  { href: '/cravings',      icon: '⚠️', label: 'Cravings' },
+  { href: '/now',           icon: '🍅', label: 'Pomodoro' },
+  { href: '/life-os',       icon: '🧬', label: 'Life OS' },
+  { href: '/gamification',  icon: '🏆', label: 'XP & Levels' },
+  { href: '/settings',      icon: '⚙️', label: 'Settings' },
 ]
 
 export default function BottomNav() {

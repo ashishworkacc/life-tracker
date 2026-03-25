@@ -44,6 +44,10 @@ firebase-admin-key.json
 # vercel
 .vercel
 
+# Claude Code local settings — may contain secrets from prior CLI sessions
+.claude/settings.local.json
+firebase-debug.log
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

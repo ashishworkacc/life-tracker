@@ -30,7 +30,6 @@ interface Todo {
 
 const PRIORITY_COLOR: Record<number, string> = { 1: '#ef4444', 2: '#f59e0b', 3: '#6b7280' }
 const PRIORITY_BG: Record<number, string> = { 1: 'rgba(239,68,68,0.12)', 2: 'rgba(245,158,11,0.12)', 3: 'rgba(107,114,128,0.12)' }
-const TAGS = ['🏠 Home', '💪 Health', '💰 Finance', '👨‍👩‍👧 Family', '📚 Learning', '🚀 Side Project', '📋 Admin', '🤝 Meeting', '⚡ Urgent', '🎯 Project']
 
 function TodosContent() {
   const { user } = useAuth()
@@ -47,8 +46,6 @@ function TodosContent() {
   // Add form
   const [showAdd, setShowAdd] = useState(false)
   const [newTitle, setNewTitle] = useState('')
-  const [newDesc, setNewDesc] = useState('')
-  const [newTag, setNewTag] = useState('')
   const [newPriority, setNewPriority] = useState<1 | 2 | 3>(2)
   const [newDueDate, setNewDueDate] = useState('')
   const [newSubTasks, setNewSubTasks] = useState<SubTask[]>([])
@@ -59,8 +56,6 @@ function TodosContent() {
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
-  const [editDesc, setEditDesc] = useState('')
-  const [editTag, setEditTag] = useState('')
   const [editPriority, setEditPriority] = useState<1 | 2 | 3>(2)
   const [editDueDate, setEditDueDate] = useState('')
   const [editBreakdownLoading, setEditBreakdownLoading] = useState(false)
@@ -117,12 +112,12 @@ function TodosContent() {
     if (!user || !newTitle.trim()) return
     setAdding(true)
     await addDocument('todos', {
-      userId: user.uid, title: newTitle.trim(), description: newDesc.trim(),
-      category: tab, tag: newTag, priority: newPriority,
+      userId: user.uid, title: newTitle.trim(), description: '',
+      category: tab, tag: '', priority: newPriority,
       dueDate: newDueDate || null, completed: false,
       subTasks: newSubTasks, createdAt: new Date().toISOString(),
     })
-    setNewTitle(''); setNewDesc(''); setNewTag(''); setNewPriority(2); setNewDueDate(''); setNewSubTasks([])
+    setNewTitle(''); setNewPriority(2); setNewDueDate(''); setNewSubTasks([])
     setShowAdd(false); setAdding(false)
     await loadTodos()
   }
@@ -161,15 +156,15 @@ function TodosContent() {
   }
 
   function startEdit(todo: Todo) {
-    setEditingId(todo.id); setEditTitle(todo.title); setEditDesc(todo.description)
-    setEditTag(todo.tag); setEditPriority(todo.priority); setEditDueDate(todo.dueDate ?? '')
+    setEditingId(todo.id); setEditTitle(todo.title)
+    setEditPriority(todo.priority); setEditDueDate(todo.dueDate ?? '')
     setMenuId(null); setExpandedId(todo.id)
   }
 
   async function saveEdit() {
     if (!editingId || !editTitle.trim()) return
-    await updateDocument('todos', editingId, { title: editTitle.trim(), description: editDesc.trim(), tag: editTag, priority: editPriority, dueDate: editDueDate || null })
-    setTodos(prev => prev.map(t => t.id === editingId ? { ...t, title: editTitle.trim(), description: editDesc.trim(), tag: editTag, priority: editPriority, dueDate: editDueDate || undefined } : t)
+    await updateDocument('todos', editingId, { title: editTitle.trim(), priority: editPriority, dueDate: editDueDate || null })
+    setTodos(prev => prev.map(t => t.id === editingId ? { ...t, title: editTitle.trim(), priority: editPriority, dueDate: editDueDate || undefined } : t)
       .sort((a, b) => a.priority !== b.priority ? a.priority - b.priority : b.createdAt.localeCompare(a.createdAt)))
     setEditingId(null)
   }
@@ -234,29 +229,6 @@ function TodosContent() {
             placeholder="What needs to be done?" autoFocus
             className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
             style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-
-          <div>
-            <label className="text-xs text-muted mb-1 block">💡 Why do you want to do this?</label>
-            <input type="text" value={newDesc} onChange={e => setNewDesc(e.target.value)}
-              placeholder="e.g. To get the promotion, to feel lighter…"
-              className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-          </div>
-
-          <div>
-            <label className="text-xs text-muted mb-1.5 block">🏷️ Tag</label>
-            <div className="flex flex-wrap gap-1.5">
-              {TAGS.map(t => (
-                <button key={t} onClick={() => setNewTag(newTag === t ? '' : t)}
-                  className="px-2.5 py-1 rounded-full text-xs font-medium"
-                  style={{
-                    background: newTag === t ? 'rgba(20,184,166,0.15)' : 'var(--surface-2)',
-                    border: newTag === t ? '1px solid #14b8a6' : '1px solid var(--border)',
-                    color: newTag === t ? '#14b8a6' : 'var(--muted)',
-                  }}>{t}</button>
-              ))}
-            </div>
-          </div>
 
           <div className="flex gap-2 items-center">
             <div className="flex gap-1">
@@ -472,23 +444,6 @@ function TodosContent() {
                           <input value={editTitle} onChange={e => setEditTitle(e.target.value)} autoFocus
                             className="w-full px-3 py-2 rounded-xl text-sm outline-none mt-2.5"
                             style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-                          <div>
-                            <label className="text-[10px] text-muted mb-1 block">💡 Why?</label>
-                            <input value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="Reason / motivation"
-                              className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-                              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--foreground)' }} />
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            {TAGS.map(t => (
-                              <button key={t} onClick={() => setEditTag(editTag === t ? '' : t)}
-                                className="px-2 py-0.5 rounded-full text-[10px]"
-                                style={{
-                                  background: editTag === t ? 'rgba(20,184,166,0.15)' : 'var(--surface-2)',
-                                  border: editTag === t ? '1px solid #14b8a6' : '1px solid var(--border)',
-                                  color: editTag === t ? '#14b8a6' : 'var(--muted)',
-                                }}>{t}</button>
-                            ))}
-                          </div>
                           <div className="flex gap-1.5">
                             {([1, 2, 3] as const).map(p => (
                               <button key={p} onClick={() => setEditPriority(p)}

@@ -167,6 +167,7 @@ export default function CountersPage() {
   const [editingCounter, setEditingCounter] = useState<Counter | null>(null)
   const [showLog, setShowLog] = useState(false)
   const [menuId, setMenuId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   // Log progress form
   const [logMode, setLogMode] = useState<'absolute' | 'delta'>('absolute')
@@ -318,7 +319,6 @@ export default function CountersPage() {
 
   async function deleteCounter(c: Counter) {
     if (!user) return
-    if (!confirm(`Delete "${c.name}"? This cannot be undone.`)) return
     await deleteDocument('custom_counters', c.id)
     setMenuId(null)
     if (selected?.id === c.id) backToList()
@@ -552,19 +552,37 @@ export default function CountersPage() {
                       <div onClick={e => e.stopPropagation()} style={{
                         position: 'absolute', top: '100%', right: 8, zIndex: 20, marginTop: 4,
                         background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.15)', minWidth: 120, overflow: 'hidden',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.15)', minWidth: 150, overflow: 'hidden',
                       }}>
-                        {[
-                          { label: '✏️ Edit',   action: () => openEdit(c) },
-                          { label: '🗑️ Delete', action: () => deleteCounter(c), red: true },
-                        ].map(item => (
-                          <button key={item.label} onClick={item.action} style={{
+                        <button onClick={() => openEdit(c)} style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          padding: '0.55rem 0.85rem', background: 'none', border: 'none',
+                          cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+                          color: 'var(--text-primary)',
+                        }}>✏️ Edit</button>
+                        {confirmDeleteId === c.id ? (
+                          <div style={{ padding: '0.4rem 0.85rem', borderTop: '1px solid var(--border)' }}>
+                            <p style={{ fontSize: '0.75rem', color: '#f59e0b', marginBottom: '0.4rem' }}>⚠️ Sure?</p>
+                            <div style={{ display: 'flex', gap: '0.4rem' }}>
+                              <button onClick={() => setConfirmDeleteId(null)} style={{
+                                flex: 1, padding: '0.3rem', borderRadius: 6, border: '1px solid var(--border)',
+                                background: 'none', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--muted)',
+                              }}>Cancel</button>
+                              <button onClick={() => { deleteCounter(c); setMenuId(null); setConfirmDeleteId(null) }} style={{
+                                flex: 1, padding: '0.3rem', borderRadius: 6, border: 'none',
+                                background: '#ef4444', cursor: 'pointer', fontSize: '0.75rem', color: '#fff', fontWeight: 700,
+                              }}>Delete</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button onClick={() => setConfirmDeleteId(c.id)} style={{
                             display: 'block', width: '100%', textAlign: 'left',
                             padding: '0.55rem 0.85rem', background: 'none', border: 'none',
+                            borderTop: '1px solid var(--border)',
                             cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
-                            color: item.red ? '#ef4444' : 'var(--text-primary)',
-                          }}>{item.label}</button>
-                        ))}
+                            color: '#ef4444',
+                          }}>🗑️ Delete</button>
+                        )}
                       </div>
                     )}
                   </div>

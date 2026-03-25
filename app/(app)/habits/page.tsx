@@ -558,6 +558,18 @@ export default function HabitsPage() {
     await loadHabits()
   }
 
+  async function pauseAllHabits() {
+    if (!user) return
+    await Promise.all(habits.map(h => updateDocument('habits', h.id, { isActive: false })))
+    setHabits(prev => prev.map(h => ({ ...h, isActive: false })))
+  }
+
+  async function resumeAllHabits() {
+    if (!user) return
+    await Promise.all(habits.map(h => updateDocument('habits', h.id, { isActive: true })))
+    setHabits(prev => prev.map(h => ({ ...h, isActive: true })))
+  }
+
   function startEdit(habit: Habit) {
     setEditingHabit(habit)
     setEditName(habit.name); setEditEmoji(habit.emoji); setEditPriority(habit.priority)
@@ -635,15 +647,17 @@ export default function HabitsPage() {
   const consistentCount = habits.filter(h => h.completionRate7d >= 70).length
   const topStreak = Math.max(...habits.map(h => h.currentStreak), 0)
 
-  // AI-sorted or default order; always push done habits to bottom
+  // AI-sorted or default order; only active habits; always push done habits to bottom
+  const allPaused = habits.length > 0 && habits.every(h => h.isActive === false)
   const displayHabits = (() => {
+    const active = habits.filter(h => h.isActive !== false)
     const sorted = aiSortedIds
-      ? [...habits].sort((a, b) => {
+      ? [...active].sort((a, b) => {
           const ia = aiSortedIds.indexOf(a.id)
           const ib = aiSortedIds.indexOf(b.id)
           return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
         })
-      : habits
+      : active
     const pending = sorted.filter(h => !activeLogs.has(h.id))
     const done    = sorted.filter(h =>  activeLogs.has(h.id))
     return [...pending, ...done]
@@ -731,6 +745,21 @@ export default function HabitsPage() {
             </button>
           )}
         </div>
+      )}
+
+      {/* ─── Pause All / Resume All ─── */}
+      {habits.length > 0 && !showAdd && (
+        <button
+          onClick={allPaused ? resumeAllHabits : pauseAllHabits}
+          className="w-full py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all"
+          style={{
+            background: allPaused ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
+            border: allPaused ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(245,158,11,0.3)',
+            color: allPaused ? '#10b981' : '#f59e0b',
+          }}
+        >
+          {allPaused ? '▶ Resume All Habits' : '⏸ Pause All Habits'}
+        </button>
       )}
 
       {/* ─── Add form ─── */}
