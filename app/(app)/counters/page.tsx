@@ -224,6 +224,7 @@ export default function CountersPage() {
   // ── Open detail ──────────────────────────────────────────────────────────
   function openDetail(c: Counter) {
     setSelected(c); setView('detail'); setTimeFilter('all')
+    setLogInput(String(c.currentCount)); setLogMode('absolute')
   }
   function backToList() {
     setView('list'); setSelected(null)
@@ -249,7 +250,7 @@ export default function CountersPage() {
       newValue = Math.max(selected.initialCount, selected.currentCount + parsed)
     }
     const delta = newValue - selected.currentCount
-    if (delta === 0 && logMode === 'absolute') { setShowLog(false); return }
+    if (delta === 0 && logMode === 'absolute') { return }
 
     setLogSaving(true)
     const milestoneXp: Record<number, number> = { 25: 100, 50: 200, 75: 300, 100: 500 }
@@ -273,7 +274,8 @@ export default function CountersPage() {
     ])
 
     setSelected({ ...selected, currentCount: newValue })
-    setShowLog(false); setLogSaving(false)
+    setLogInput(String(newValue))
+    setLogSaving(false)
     await load()
   }
 
@@ -353,6 +355,30 @@ export default function CountersPage() {
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0' }}>
                   {selected.currentCount} / {selected.targetCount} {selected.unit}
                 </p>
+                {/* Inline progress update */}
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem', alignItems: 'center' }}>
+                  <input
+                    type="number"
+                    value={logInput}
+                    onChange={e => setLogInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && saveLog()}
+                    placeholder={`Current ${selected.unit}`}
+                    style={{
+                      width: 110, padding: '0.4rem 0.6rem', borderRadius: 8,
+                      border: `1.5px solid ${selected.color}50`,
+                      background: 'var(--surface-2)', color: 'var(--text-primary)',
+                      fontSize: '0.88rem', fontWeight: 700, outline: 'none',
+                    }}
+                  />
+                  <button onClick={saveLog} disabled={logSaving} style={{
+                    padding: '0.4rem 0.9rem', borderRadius: 8, border: 'none',
+                    background: selected.color, color: '#fff',
+                    fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer',
+                    opacity: logSaving ? 0.7 : 1,
+                  }}>
+                    {logSaving ? '…' : 'Update'}
+                  </button>
+                </div>
               </div>
               {/* Circular progress */}
               <div style={{ position: 'relative', width: 64, height: 64 }}>
@@ -462,13 +488,6 @@ export default function CountersPage() {
             )}
           </div>
 
-          {/* Log Progress FAB */}
-          <button onClick={openLog} style={{
-            position: 'fixed', bottom: '5rem', right: '1.25rem', zIndex: 50,
-            background: selected.color, color: '#fff', border: 'none', borderRadius: '50%',
-            width: 52, height: 52, fontSize: '1.4rem', cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>+</button>
         </>
       )}
 
@@ -499,6 +518,7 @@ export default function CountersPage() {
                 return (
                   <div key={c.id} onClick={() => openDetail(c)} style={{
                     position: 'relative', borderRadius: 14, cursor: 'pointer',
+                    zIndex: menuId === c.id ? 10 : 'auto',
                     background: p > 0
                       ? `linear-gradient(to right, ${c.color}22 ${p}%, var(--surface) ${p}%)`
                       : 'var(--surface)',
@@ -555,68 +575,6 @@ export default function CountersPage() {
         </>
       )}
 
-      {/* ─── LOG PROGRESS MODAL ──────────────────────────────────────────── */}
-      {showLog && selected && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
-          onClick={() => setShowLog(false)}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: 'var(--surface)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2.5rem',
-            width: '100%', maxWidth: 480,
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <p style={{ fontWeight: 800, fontSize: '1rem', margin: 0 }}>Log Progress — {selected.name}</p>
-              <button onClick={() => setShowLog(false)} style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
-            </div>
-
-            {/* Mode toggle */}
-            <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 3, marginBottom: '1rem', gap: '0.25rem' }}>
-              {(['absolute','delta'] as const).map(m => (
-                <button key={m} onClick={() => { setLogMode(m); setLogInput(m === 'absolute' ? String(selected.currentCount) : '1') }} style={{
-                  flex: 1, padding: '0.4rem', borderRadius: 6, border: 'none', cursor: 'pointer',
-                  fontSize: '0.78rem', fontWeight: 600,
-                  background: logMode === m ? selected.color : 'transparent',
-                  color: logMode === m ? '#fff' : 'var(--text-muted)',
-                }}>
-                  {m === 'absolute' ? `Current value` : `Add amount`}
-                </button>
-              ))}
-            </div>
-
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
-              {logMode === 'absolute' ? `Where are you now? (${selected.unit})` : `How much to add? (${selected.unit})`}
-            </label>
-            <input
-              type="number" value={logInput} onChange={e => setLogInput(e.target.value)}
-              autoFocus
-              style={{
-                width: '100%', padding: '0.7rem 0.85rem', borderRadius: 10, fontSize: '1.2rem', fontWeight: 700,
-                border: `2px solid ${selected.color}`, background: 'var(--surface-2)', color: 'var(--text-primary)',
-                outline: 'none', boxSizing: 'border-box',
-              }}
-            />
-            {(() => {
-              const parsed = parseFloat(logInput)
-              if (isNaN(parsed)) return null
-              const newVal = logMode === 'absolute' ? Math.max(selected.initialCount, parsed) : Math.max(selected.initialCount, selected.currentCount + parsed)
-              const delta = newVal - selected.currentCount
-              if (delta === 0) return null
-              return (
-                <p style={{ fontSize: '0.78rem', color: delta > 0 ? '#10b981' : '#ef4444', margin: '0.4rem 0 0', fontWeight: 600 }}>
-                  {delta > 0 ? '+' : ''}{delta} {selected.unit} · {Math.round(pct({ ...selected, currentCount: newVal }))}% complete
-                </p>
-              )
-            })()}
-
-            <button onClick={saveLog} disabled={logSaving} style={{
-              width: '100%', marginTop: '1rem', padding: '0.75rem', borderRadius: 10, border: 'none',
-              background: selected.color, color: '#fff', fontWeight: 700, fontSize: '0.95rem',
-              cursor: logSaving ? 'wait' : 'pointer', opacity: logSaving ? 0.7 : 1,
-            }}>
-              {logSaving ? 'Saving…' : 'Save Progress'}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ─── ADD / EDIT TRACKER MODAL ─────────────────────────────────────── */}
       {showAdd && (
