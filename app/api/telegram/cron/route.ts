@@ -84,8 +84,8 @@ async function sendDailyReport(chatId: string, userId: string) {
 
   const coveragePct = totalCount > 0 ? Math.round((filledCount / totalCount) * 100) : 0
 
-  // Score emoji
-  const scoreEmoji = mediocreScore >= 70 ? '🟢' : mediocreScore >= 40 ? '🟡' : '🔴'
+  // Score emoji — mediocreScore is % of mediocre blocks, so LOW is good
+  const scoreEmoji = mediocreScore <= 30 ? '🟢' : mediocreScore <= 60 ? '🟡' : '🔴'
 
   let report = `📊 Daily Report — ${date}\n`
   report += `${'─'.repeat(28)}\n`
