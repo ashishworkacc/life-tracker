@@ -1,3 +1,21 @@
+/**
+ * @module ai/client
+ * @description OpenRouter AI client for LifeTracker.
+ *
+ * Uses the OpenAI-compatible API exposed by OpenRouter so the app can switch
+ * models (DeepSeek, Gemini, GPT-4o-mini, Qwen) by changing one env var
+ * without touching call sites.
+ *
+ * Default model: `deepseek/deepseek-chat` (DeepSeek V3) — cheap and capable
+ * for all structured-output tasks (macro estimation, habit analysis, etc.)
+ *
+ * Usage:
+ *   import { aiComplete } from '@/lib/ai/client'
+ *   const result = await aiComplete(systemPrompt, userPrompt)
+ *
+ * For streaming (AI Chat page):
+ *   for await (const chunk of aiStream(system, messages)) { ... }
+ */
 import OpenAI from 'openai'
 
 // OpenRouter is OpenAI-API-compatible — just change the baseURL and API key

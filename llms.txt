@@ -1,0 +1,83 @@
+# LifeTracker
+
+> An open-source, self-hosted personal Life OS built with Next.js 16, Firebase, and AI.
+> Track habits, todos, time blocks, health metrics, food, and focus in one unified dashboard.
+> Powered by an AI pipeline (OpenRouter → DeepSeek V3) and Telegram bots for passive check-ins.
+
+## What This Project Is
+
+LifeTracker is a complete personal productivity and self-quantification system for a single user.
+It replaces a collection of separate apps (Habitica, Toggl, Todoist, MyFitnessPal, etc.) with one
+self-hosted application where all data lives in your own Firebase project.
+
+The defining feature is the Telegram bot integration: every 30 minutes, a bot asks what you are
+working on. You reply in plain text. The time block is logged automatically. No app open required.
+A second bot handles food logging — send "2 eggs and coffee" and AI estimates the macros.
+
+## Core Features
+
+- Habit tracking: daily/weekly, streaks, AI sort by optimal order, pause/resume all, count-based
+- Todos: P1/P2/P3 priority, due dates, AI-generated sub-task breakdown per todo item
+- Time Ledger: 30-minute slot time blocking, bulk fill, gap detection, AI day analysis
+- Food logging: plain-English Telegram input, AI macro estimation, retrospective date entry
+- Apple Health import: client-side XML parser for the full Health export ZIP
+- Gamification: XP system (habits +10, todos +10, milestones +100), levels, badges, streaks
+- Craving tracker: Atomic Habits cue-craving-response-reward loop + urge surfing timer
+- Correlation engine: statistical relationships between tracked variables
+- Custom counters: track anything with XP milestones and progress charts
+
+## Technology Stack
+
+- Framework: Next.js 16.1.6 with App Router, TypeScript, Turbopack
+- Database: Cloud Firestore (asia-south1), 25+ collections, per-user security rules
+- Auth: Firebase Authentication (email + Google OAuth)
+- Server: Firebase Admin SDK for bot webhook handlers
+- AI: OpenRouter API → DeepSeek V3 (deepseek/deepseek-chat), ~12 AI endpoints
+- Notifications: Telegram Bot API, two bots (check-in + food logger)
+- Deployment: Vercel serverless (bom1/Mumbai region)
+- Charting: Recharts
+
+## Key Source Files
+
+- /app/(app)/command-center/page.tsx — Daily home dashboard (most complex page)
+- /app/(app)/habits/page.tsx — Habit tracking with AI sort and streak logic
+- /app/(app)/time-ledger/page.tsx — 30-min slot time blocking UI
+- /app/(app)/trackers/food/page.tsx — Food log with AI macro fill
+- /app/(app)/counters/page.tsx — Custom event counters with XP
+- /app/(app)/cravings/page.tsx — Craving tracker with urge surfing timer
+- /app/api/telegram/webhook/route.ts — Check-in bot: handles /start and slot updates
+- /app/api/telegram/food-webhook/route.ts — Food bot: NLP → AI parse → Firestore write
+- /app/api/telegram/cron/route.ts — Sends 30-min nudges to all linked users
+- /lib/firebase/db.ts — Firestore CRUD abstraction layer
+- /lib/firebase/admin.ts — Firebase Admin SDK init (server-side writes)
+- /lib/ai/client.ts — OpenRouter client: aiComplete() and aiStream()
+- /lib/ai/prompts.ts — All 20 AI system prompt templates
+- /lib/xp.ts — XP/level calculation (exponential curve: 200 * 1.5^(level-1))
+- /firestore.rules — Security rules (userId-based isolation on all collections)
+
+## Data Model Summary
+
+Every document in Firestore includes a `userId` field. Security rules enforce:
+  allow read, write: if resource.data.userId == request.auth.uid (update)
+  allow create: if request.resource.data.userId == request.auth.uid (create)
+
+Main collections: habits, daily_habit_logs, todos, goals, milestones, time_ledger,
+food_logs, sleep_logs, weight_logs, vitals_logs, custom_counters, counter_logs,
+bad_habit_logs, inbox, pomodoro_sessions, xp_events, user_xp, badges, telegram_links,
+daily_summaries, daily_insights, correlations, weekly_reflections, users
+
+## Setup Summary
+
+1. Clone repo, npm install
+2. Copy .env.example to .env.local, fill in Firebase + OpenRouter + Telegram keys
+3. Deploy Firestore rules: npx firebase-tools deploy --only firestore:rules,firestore:indexes
+4. npm run dev → sign up → automatically provisioned as pro user
+5. (Optional) Register Telegram webhooks, set up external 30-min cron
+
+## Documentation Files
+
+- README.md — Full setup guide, architecture diagram, feature list
+- CONTRIBUTING.md — Dev environment setup, coding conventions, PR process
+- SECURITY.md — Responsible disclosure policy
+- TERMS_OF_USE.md — Non-commercial use, attribution, data sovereignty
+- .env.example — All required environment variables with descriptions

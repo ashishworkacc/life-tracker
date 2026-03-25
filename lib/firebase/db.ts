@@ -1,3 +1,21 @@
+/**
+ * @module db
+ * @description Firestore data-access layer for LifeTracker.
+ *
+ * All functions use lazy initialisation via `firebaseDb()` to avoid SSR
+ * failures in Next.js — never import `getFirestore()` at module level.
+ *
+ * Every document written through this layer should include a `userId` field
+ * that matches the authenticated user's UID. The deployed Firestore security
+ * rules enforce this at the database level.
+ *
+ * Collections used by the app:
+ *   habits, daily_habit_logs, todos, goals, milestones, time_ledger,
+ *   food_logs, sleep_logs, weight_logs, vitals_logs, custom_counters,
+ *   counter_logs, bad_habit_logs, inbox, pomodoro_sessions, xp_events,
+ *   user_xp, badges, telegram_links, daily_summaries, daily_insights,
+ *   correlations, weekly_reflections, users
+ */
 import {
   doc,
   setDoc,
