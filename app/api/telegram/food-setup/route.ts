@@ -1,12 +1,12 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 // GET /api/telegram/food-setup
 // Call this once to register the food bot webhook with Telegram.
-export async function GET() {
+export async function GET(req: NextRequest) {
   const token = process.env.TELEGRAM_FOOD_BOT_TOKEN
   if (!token) return NextResponse.json({ error: 'TELEGRAM_FOOD_BOT_TOKEN not set' }, { status: 500 })
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.headers.get('origin') ?? ''
   if (!appUrl) return NextResponse.json({ error: 'NEXT_PUBLIC_APP_URL not set' }, { status: 500 })
 
   const webhookUrl = `${appUrl}/api/telegram/food-webhook`
